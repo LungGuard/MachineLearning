@@ -1,0 +1,18 @@
+# Python artifacts
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Virtual environments
+.venv/
+.env/
+
+# OS files
+.DS_Store
+
+# Local datasets and cache
+
+datasets/
+ClassificationModel/datasets/
+DetectionModel/datasets/
