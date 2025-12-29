@@ -20,4 +20,8 @@ class DatasetConstants:
     UNIFIED_DATASET_VAL_DIR = UNIFIED_DATASET_DIR / VAL_SPLIT_NAME
     IMAGE_SIZE=(224, 224)
     BATCH_SIZE = 32
+    DATASET_LABEL_MODE='categorical'
+    SEED = 42
+    CLASS_NAMES_KEY = 'class_names'
+    NUM_CLASSES_KEY = 'num_classes'
 

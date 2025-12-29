@@ -1,4 +1,10 @@
 from pathlib import Path
+import sys
+
+# Add src directory to Python's module search path so it can find 'common' package
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from common.constants.datasets_constants import DatasetConstants
 
 
 class DatasetCalculator:
@@ -47,7 +53,7 @@ class DatasetCalculator:
     
     def print_dataset_statistics(self, splits=None):
         if splits is None:
-            splits = ["train", "validation", "test"]
+            splits = [DatasetConstants.TRAIN_SPLIT_NAME, DatasetConstants.VAL_SPLIT_NAME, DatasetConstants.TEST_SPLIT_NAME]
         
         print(f"\n{'='*60}")
         print(f"Dataset Statistics")
@@ -106,42 +112,7 @@ def normalize_class_name(class_name):
 
 
 def main():
-    """Load and display statistics for all datasets."""
-    # HuggingFace dataset
-    hf_dataset = load_dataset(HuggingFaceFields.DATASET_NAME, cache_dir=HuggingFaceFields.CACHE_DIR)
-    hf_class_names = hf_dataset["train"].features["label"].names
-    hf_calculator = DatasetCalculator(hf_class_names)
-    hf_calculator.print_dataset_statistics("HuggingFace - Lung Cancer", hf_dataset)
-
-    # Figshare dataset
-    figshare_dir = Path(__file__).parent.parent / "datasets" / "figshare_dataset"
-    figshare_calculator = FigshareDatasetCalculator(figshare_dir)
-    figshare_calculator.print_dataset_statistics("Figshare - Lung Cancer")
-
-    # Combined statistics
-    hf_summaries = []
-    for split in hf_dataset.keys():
-        labels = hf_dataset[split]["label"]
-        summary = hf_calculator.calculate_split_stats(labels)
-        hf_summaries.append(summary)
-
-    figshare_summaries = []
-    for split in ["training", "validation", "test"]:
-        try:
-            summary = figshare_calculator.calculate_split_stats(split)
-            figshare_summaries.append(summary)
-        except FileNotFoundError:
-            pass
-
-    all_summaries = hf_summaries + figshare_summaries
-    combined_summary = CombinedDatasetCalculator.merge_summaries(all_summaries)
-    CombinedDatasetCalculator.print_summary("Combined Statistics (All Data)", combined_summary)
-
-
-def main():
-    merged_dataset_dir = Path(__file__).parent.parent.parent.parent / "ClassificationModel" / "datasets" / "merged_dataset"
-    
-    calculator = DatasetCalculator(merged_dataset_dir)
+    calculator = DatasetCalculator(DatasetConstants.UNIFIED_DATASET_DIR)
     calculator.print_dataset_statistics()
 
 
