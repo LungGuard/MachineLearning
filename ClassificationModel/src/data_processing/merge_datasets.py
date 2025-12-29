@@ -103,13 +103,9 @@ def main():
     print(f"Merged dataset available at: {OUTPUT_DIR}")
 
 
+
+
 if __name__ == "__main__":
     main()
-if __name__ == "__main__":
-    PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
-    FIGSHARE_DIR = PROJECT_ROOT / "ClassificationModel" / "datasets" / "figshare_dataset"
-    HUGGINGFACE_CACHE = PROJECT_ROOT / "ClassificationModel" / "datasets" / "hugging_face_dataset"
-    OUTPUT_DIR = PROJECT_ROOT / "ClassificationModel" / "datasets" / "merged_dataset"
-    
-    merger = DatasetMerger(FIGSHARE_DIR, HUGGINGFACE_CACHE, OUTPUT_DIR)
-    merger.merge()
+
+
