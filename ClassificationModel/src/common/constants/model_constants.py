@@ -13,4 +13,6 @@ class ModelConstants:
     EPOCHS = 100
     STATE_MODEL_WEIGHTS = 'model_weights'
     STATE_MODEL_CONFIG = 'model_config'
-    CHECKPOINT_DIR_PATH= 'ClassificationModel/src/checkpoints'
+    CHECKPOINT_DIR_PATH = 'ClassificationModel/src/checkpoints'
+    CANCER_TYPE_RESULT_KEY = 'cancer_type'
+    CONFIDENCE_KEY = 'confidence'

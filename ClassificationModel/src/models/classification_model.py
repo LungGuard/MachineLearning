@@ -95,7 +95,7 @@ class CancerClassificationModel:
         
         return history
     
-    def evaluate_model(self):
+    def evaluate_model(self,present_metrics=False):
         test_dataset = self.dataset[DatasetConstants.TEST_SPLIT_NAME]
         
         results = self.model.evaluate(test_dataset, verbose=1)
@@ -106,12 +106,24 @@ class CancerClassificationModel:
             ModelConstants.METRIC_PRECISION: results[2],
             ModelConstants.METRIC_RECALL: results[3]
         }
+
+        if present_metrics:
+            for metric,value in metrics.items():
+                print(f'{metric}: {value:.3f}')
         
         return metrics
+    
     def predict(self, images):
         predictions = self.model.predict(images)
+        confidences = np.max(predictions,axis=1)
         predicted_indices = np.argmax(predictions, axis=1)
         predicted_class_names = [self.class_names[idx] for idx in predicted_indices]
-        return predicted_class_names
+        return [
+            {
+                ModelConstants.CANCER_TYPE_RESULT_KEY: cancer_type,
+                ModelConstants.CONFIDENCE_KEY: confidence
+            }
+            for cancer_type, confidence in zip(predicted_class_names, confidences)
+        ]
 
 
