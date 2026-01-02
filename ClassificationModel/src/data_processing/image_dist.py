@@ -2,9 +2,9 @@ from pathlib import Path
 import sys
 
 # Add src directory to Python's module search path so it can find 'common' package
-sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
-from common.constants.datasets_constants import DatasetConstants
+from ClassificationModel.src.common.constants.datasets_constants import DatasetConstants
 
 
 class DatasetCalculator:

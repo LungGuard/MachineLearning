@@ -1,6 +1,6 @@
-from data_processing.merge_datasets import DatasetMerger
+from ClassificationModel.src.data_processing.merge_datasets import DatasetMerger
 import os
-from common.constants.datasets_constants import DatasetConstants
+from ClassificationModel.src.common.constants.datasets_constants import DatasetConstants
 import tensorflow as tf
 
 def load_dataset(base_path=DatasetConstants.UNIFIED_DATASET_DIR
@@ -24,6 +24,7 @@ def load_dataset(base_path=DatasetConstants.UNIFIED_DATASET_DIR
         image_size=image_size,
         batch_size=batch_size,
         label_mode=DatasetConstants.DATASET_LABEL_MODE,
+        color_mode='grayscale',
         shuffle=True,
         seed=DatasetConstants.SEED
     )
@@ -32,6 +33,7 @@ def load_dataset(base_path=DatasetConstants.UNIFIED_DATASET_DIR
         image_size=image_size,
         batch_size=batch_size,
         label_mode=DatasetConstants.DATASET_LABEL_MODE,
+        color_mode='grayscale',
         shuffle=False
     )
     
@@ -40,6 +42,7 @@ def load_dataset(base_path=DatasetConstants.UNIFIED_DATASET_DIR
         image_size=image_size,
         batch_size=batch_size,
         label_mode=DatasetConstants.DATASET_LABEL_MODE,
+        color_mode='grayscale',
         shuffle=False
     )
     class_names = train.class_names

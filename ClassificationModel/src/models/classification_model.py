@@ -5,19 +5,18 @@ import numpy as np
 from tensorflow.keras.models import Sequential
 from tensorflow.keras import layers
 import pickle
-from common.constants.model_constants import ModelConstants
-from common.constants.datasets_constants import DatasetConstants
+from ClassificationModel.src.common.constants.model_constants import ModelConstants
+from ClassificationModel.src.common.constants.datasets_constants import DatasetConstants
 from ClassificationModel.src.utils.dataset_utils import load_dataset
-from utils.model_utils import ModelCheckpoints
 
-class CancerClassificationModel(ModelCheckpoints):
+class CancerClassificationModel:
     def __init__(self, dataset, input_shape):
         self.dataset = dataset
         self.input_shape = input_shape
         self.num_classes = dataset[DatasetConstants.NUM_CLASSES_KEY]
         self.class_names = dataset[DatasetConstants.CLASS_NAMES_KEY]
         self.model = None
-        self.build_model()
+        self.__build_model()
 
     def _add_conv_block(self, filters):
         '''
@@ -51,7 +50,7 @@ class CancerClassificationModel(ModelCheckpoints):
         ))
         self.model.add(layers.BatchNormalization())
     
-    def build_model(self):
+    def __build_model(self):
         """Build and compile the CNN model."""
         self.model = Sequential([layers.Input(shape=self.input_shape)])
         
