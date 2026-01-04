@@ -1,0 +1,26 @@
+from enum import StrEnum,Enum
+
+
+class NotificationPriority(StrEnum):
+    MIN = "min"
+    LOW = "low"
+    DEFAULT = "default"
+    HIGH = "high"
+    URGENT = "urgent"
+
+class NotificationTags(StrEnum):
+    SUCCESS = "white_check_mark"
+    ERROR = "x"
+    WARNING = "warning"
+    INFO = "information_source"
+    TRAINING = "chart_with_upwards_trend"
+    COMPLETE = "tada"
+    START = "rocket"
+
+class NotificationFields(Enum):
+    DEFAULT_TITLE = "LungGuard Notification"
+
+class NotificationHeaders(StrEnum):
+    PRIORITY_HEADER = "Priority"
+    TITLE_HEADER = "Title"
+    TAGS_HEADER = "Tags"
