@@ -5,8 +5,8 @@ import numpy as np
 from tensorflow.keras.models import Sequential
 from tensorflow.keras import layers
 import pickle
-from ClassificationModel.src.common.constants.model_constants import ModelConstants
-from ClassificationModel.src.common.constants.datasets_constants import DatasetConstants
+from constants.classification.model_constants import ModelConstants
+from constants.classification.datasets_constants import DatasetConstants
 from ClassificationModel.src.utils.dataset_utils import load_dataset
 
 class CancerClassificationModel:

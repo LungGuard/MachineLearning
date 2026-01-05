@@ -1,10 +1,14 @@
 import requests
 from datetime import datetime
-from constants.notification_fields import NotificationPriority,NotificationTags,NotificationFields,NotificationHeaders
+from constants.notification_fields import NotificationPriority, NotificationTags, NotificationFields, NotificationHeaders
 
 
 class NtfyNotificationService:
-    def __init__(self, topic_name: str, base_url: str = "https://ntfy.sh"):
+    def __init__(self,
+                 model_name
+                 ,topic_name: str = NotificationFields.TOPIC_NAME
+                 , base_url: str = "https://ntfy.sh"):
+        self.model_name=model_name
         self.topic_name = topic_name
         self.base_url = base_url
         self.url = f"{base_url}/{topic_name}"
@@ -21,23 +25,21 @@ class NtfyNotificationService:
         )
 
         return response.status_code == 200
-
-
-# Module-level singleton instance
-_notification_service_instance = None
-
-def get_notification_service(topic_name: str = NotificationFields.TOPIC_NAME, base_url: str = "https://ntfy.sh") -> NtfyNotificationService:
-    """Get the global notification service instance"""
-    global _notification_service_instance
     
-    if _notification_service_instance is None:
-        if topic_name is None:
-            raise ValueError("topic_name is required for first initialization")
-        _notification_service_instance = NtfyNotificationService(topic_name, base_url)
-    elif topic_name and _notification_service_instance.topic_name != topic_name:
-        # Create new instance if topic changed
-        _notification_service_instance = NtfyNotificationService(topic_name, base_url)
+    def send_training_start_message(self):
+        return self.send_message(
+            msg=f"Model: {self.model_name}\nStarted at {datetime.now().strftime('%H:%M:%S')}",
+            title=NotificationFields.TRAINING_STARTED_TITLE,
+            priority=NotificationPriority.DEFAULT,
+            tags=[NotificationTags.START, NotificationTags.TRAINING]
+        )
     
-    return _notification_service_instance
+    def send_training_end_message(self,metrics,duration):
+        return self.send_message(
+            msg=f"Model : {self.model_name}\nRunning time: {duration:.1f}\n{metrics}",
+            title=NotificationFields.TRAINING_COMPLETED_TITLE,
+            priority=NotificationPriority.HIGH,
+            tags=[NotificationTags.COMPLETE, NotificationTags.SUCCESS]
+        )
 
-    
+

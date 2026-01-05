@@ -1,6 +1,6 @@
 from ClassificationModel.src.data_processing.merge_datasets import DatasetMerger
 import os
-from ClassificationModel.src.common.constants.datasets_constants import DatasetConstants
+from constants.classification.datasets_constants import DatasetConstants
 import tensorflow as tf
 
 def load_dataset(base_path=DatasetConstants.UNIFIED_DATASET_DIR

@@ -16,3 +16,4 @@ class ModelConstants:
     CHECKPOINT_DIR_PATH = 'ClassificationModel/src/checkpoints'
     CANCER_TYPE_RESULT_KEY = 'cancer_type'
     CONFIDENCE_KEY = 'confidence'
+    MODEL_NAME = 'Cancer Classification Model'
