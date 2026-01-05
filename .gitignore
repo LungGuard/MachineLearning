@@ -3,6 +3,7 @@ __pycache__/
 *.py[cod]
 *.pyo
 *.pyd
+*.pyc
 
 # Virtual environments
 .venv/
@@ -10,9 +11,20 @@ __pycache__/
 
 # OS files
 .DS_Store
+*.swp
+*.swo
+*~
 
 # Local datasets and cache
-
 datasets/
 ClassificationModel/datasets/
 DetectionModel/datasets/
+
+# Training artifacts (keep directory structure)
+logs/*
+!logs/.gitkeep
+checkpoints/*
+!checkpoints/.gitkeep
+
+# Jupyter notebook checkpoints
+.ipynb_checkpoints/
