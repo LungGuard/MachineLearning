@@ -19,6 +19,7 @@ class NotificationTags(StrEnum):
 
 class NotificationFields(Enum):
     DEFAULT_TITLE = "LungGuard Notification"
+    TOPIC_NAME = "FinalsProjectNotifications"
 
 class NotificationHeaders(StrEnum):
     PRIORITY_HEADER = "Priority"
