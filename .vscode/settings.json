@@ -5,7 +5,14 @@
     "**/.svn": true,
     "**/.hg": true,
     "**/.DS_Store": true,
-    "**/Thumbs.db": true
+    "**/Thumbs.db": true,
+    "**/.venv": true,
+    "**/venv": true,
+    "**/__pycache__": true,
+    "**/*.pyc": true,
+    "**/.pytest_cache": true,
+    "**/*.egg-info": true,
+    "**/__init__.py": true
   },
   "explorerExclude.backup": {}
 }
