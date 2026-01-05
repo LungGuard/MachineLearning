@@ -17,3 +17,7 @@ class ModelConstants:
     CANCER_TYPE_RESULT_KEY = 'cancer_type'
     CONFIDENCE_KEY = 'confidence'
     MODEL_NAME = 'Cancer Classification Model'
+    TRACKED_LOSS_METRIC = 'loss'
+    TRACKED_VAL_LOSS_METRIC = 'val_loss'
+    TRACKED_ACCURACY_METRIC = 'accuracy'
+    TRACKED_VAL_ACCURACY_METRIC = 'val_accuracy'
