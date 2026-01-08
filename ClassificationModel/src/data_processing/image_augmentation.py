@@ -1,13 +1,13 @@
 import cv2 as cv
 import numpy as np
-
+from constants.classification.augmentation_constants import AugmenterFields
 
 class ImageAugmentationPipeline:
-    def __init__(self,rotation_range:int=10,
-                 flip_probability=0.5,
-                 brightness_range=0.1,    # ±10% of mean intensity
-                 contrast_range=0.1,     # ±10% contrast
-                 denoise_probability=0.3):
+    def __init__(self,rotation_range:int=AugmenterFields.DEFAULT_ROTATION_RANGE,
+                 flip_probability=AugmenterFields.DEFAULT_FLIP_PROBABILITY,
+                 brightness_range=AugmenterFields.DEFAULT_BRIGHTNESS_RANGE,    # ±10% of mean intensity
+                 contrast_range=AugmenterFields.DEFAULT_CONTRAST_RANGE,     # ±10% contrast
+                 denoise_probability=AugmenterFields.DEFAULT_DENOISE_PROBABILITY):
         self.rotation_range=rotation_range
         self.flip_probability = flip_probability
         self.brightness_range=brightness_range
@@ -69,7 +69,7 @@ class ImageAugmentationPipeline:
         )
 
         return image*brightness_factor
-    def _adjust_constrast(self,image):
+    def _adjust_contrast(self,image):
         contrast_factor = np.random.uniform(
             1 - self.contrast_range, 
             1 + self.contrast_range
@@ -80,7 +80,7 @@ class ImageAugmentationPipeline:
     
     def _apply_brightness_contrast(self,image,max,min):
         augmented=self._adjust_brightness(image)
-        augmented=self._adjust_constrast(augmented)
+        augmented=self._adjust_contrast(augmented)
         
         # Clipping to original range to prevent invalid values
         return np.clip(augmented, min, max)
@@ -97,3 +97,4 @@ class ImageAugmentationPipeline:
         ) if should_denoise else image
         
         return denoised
+

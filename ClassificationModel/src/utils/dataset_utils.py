@@ -2,6 +2,7 @@ from ClassificationModel.src.data_processing.merge_datasets import DatasetMerger
 import os
 from constants.classification.datasets_constants import DatasetConstants
 import tensorflow as tf
+from ClassificationModel.src.data_processing.image_augmentation import ImageAugmentationPipeline
 
 def load_dataset(base_path=DatasetConstants.UNIFIED_DATASET_DIR
                 ,image_size=DatasetConstants.IMAGE_SIZE
@@ -58,7 +59,23 @@ def load_dataset(base_path=DatasetConstants.UNIFIED_DATASET_DIR
     return dataset
 
 
-
+def apply_augmentation(split,augmenter):
+    def augment_map(image, label):
+        augmented = tf.numpy_function(
+            func=lambda img: augmenter(img.numpy()),
+            inp=[image],
+            Tout=tf.float32
+        )
+        augmented.set_shape(image.shape)
+        return augmented, label
+    
+    augmented_dataset = (
+        split
+        .map(augment_map, num_parallel_calls=tf.data.AUTOTUNE)
+        .prefetch(tf.data.AUTOTUNE)
+    )
+    
+    return augmented_dataset
 
 
 

@@ -68,7 +68,7 @@ class NtfyNotificationService:
             tags=[NotificationTags.INFO]
         )
     
-    def send_evaulation_results(self,metrics):
+    def send_evaluation_results(self,metrics):
         return self.send_message(
             msg=metrics,
             title="Evaulation Results",

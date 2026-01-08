@@ -116,7 +116,7 @@ class CancerClassificationModel:
         
         if send_message:
             metrics=NtfyNotificationService.format_metrics_msg(results)
-            self.notifier.send_evaulation_results(metrics)
+            self.notifier.send_evaluation_results(metrics)
 
         return results
     

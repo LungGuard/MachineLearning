@@ -1,5 +1,13 @@
 {
-  "cSpell.words": ["Ntfy"],
+  "cSpell.words": [
+    "AUTOTUNE",
+    "denoise",
+    "denoised",
+    "denoising",
+    "FIGSHARE",
+    "huggingface",
+    "Ntfy"
+  ],
   "files.exclude": {
     "**/.git": true,
     "**/.svn": true,
