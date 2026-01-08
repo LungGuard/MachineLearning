@@ -9,6 +9,7 @@ from constants.classification.model_constants import ModelConstants
 from constants.classification.datasets_constants import DatasetConstants
 from ClassificationModel.src.utils.dataset_utils import load_dataset
 from utils.notification_service import NtfyNotificationService
+from ClassificationModel.src.data_processing.image_augmentation import ImageAugmentationPipeline,apply_augmentation
 class CancerClassificationModel:
     def __init__(self, dataset, input_shape,model_name=ModelConstants.MODEL_NAME):
         self.dataset = dataset
@@ -19,11 +20,7 @@ class CancerClassificationModel:
         self.model = None
         self.__build_model()
 
-    def __add_augmentation_layer(self):
-        self.model.add(layers.RandomFlip(ModelConstants.HORIZONTAL_FLIP_AUGMENTATION))
-        self.model.add(layers.RandomRotation(0.1))
-        self.model.add(layers.RandomZoom(0.1))
-        self.model.add(layers.RandomContrast(0.1))
+
 
     def _add_conv_block(self, filters):
         '''
@@ -60,8 +57,7 @@ class CancerClassificationModel:
         """Build and compile the CNN model."""
         self.model = Sequential([layers.Input(shape=self.input_shape)])
         
-        # Data augmentation layer
-        self.__add_augmentation_layer()
+
         # Convolutional blocks
         self._add_conv_block(filters=32)
         self._add_conv_block(filters=64)
@@ -85,16 +81,22 @@ class CancerClassificationModel:
             metrics=[
                 ModelConstants.METRIC_ACCURACY,
                 tf.keras.metrics.Precision(name=ModelConstants.METRIC_PRECISION),
-                tf.keras.metrics.Recall(name=ModelConstants.METRIC_RECALL)
+                tf.keras.metrics.Recall(name=ModelConstants.METRIC_RECALL),
+                tf.keras.metrics.AUC(name=ModelConstants.METRIC_AUC, multi_label=False)
             ]
         )
 
 
-    def train_model(self, epochs=ModelConstants.EPOCHS,callbacks=None):
+    def train_model(self, epochs=ModelConstants.EPOCHS,callbacks=None,augment_train=False,augmenter=None):
         """Train the model on the dataset."""
         train_dataset = self.dataset[DatasetConstants.TRAIN_SPLIT_NAME]
         val_dataset = self.dataset[DatasetConstants.VAL_SPLIT_NAME]
-        
+
+        if augment_train:
+            try:
+                train_dataset = apply_augmentation(train_dataset,augmenter)    
+            except ValueError as e:
+                print(f'Error : {e}')
         
         history = self.model.fit(
             train_dataset,

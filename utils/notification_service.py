@@ -71,7 +71,7 @@ class NtfyNotificationService:
     def send_evaluation_results(self,metrics):
         return self.send_message(
             msg=metrics,
-            title="Evaulation Results",
+            title=NotificationFields.EVAL_RESULTS_TITLE,
             priority=NotificationPriority.HIGH,
             tags=[NotificationTags.COMPLETE, NotificationTags.SUCCESS]
         )

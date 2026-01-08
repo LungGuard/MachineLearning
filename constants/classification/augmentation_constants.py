@@ -1,7 +1,7 @@
 from enum import Enum
 
 
-class AugmenterFields(Enum):
+class AugmenterFields:
     DEFAULT_ROTATION_RANGE=10
     DEFAULT_FLIP_PROBABILITY=0.5
     DEFAULT_BRIGHTNESS_RANGE=0.1

@@ -1,5 +1,5 @@
 from pathlib import Path
-
+from enum import Enum
 
 class ModelConstants:
     RELU_ACTIVATION_FUNCTION='relu'
@@ -10,6 +10,7 @@ class ModelConstants:
     METRIC_ACCURACY = 'accuracy'
     METRIC_PRECISION = 'precision'
     METRIC_RECALL = 'recall'
+    METRIC_AUC = 'auc'
     EPOCHS = 100
     STATE_MODEL_WEIGHTS = 'model_weights'
     STATE_MODEL_CONFIG = 'model_config'
