@@ -1,5 +1,6 @@
 import cv2 as cv
 import numpy as np
+import tensorflow as tf
 from constants.classification.augmentation_constants import AugmenterFields
 import tensorflow as tf
 
@@ -122,11 +123,12 @@ class ImageAugmentationPipeline:
             sigmaSpace=30     
         ) if should_denoise else image
         return denoised
-
 def apply_augmentation(split, augmenter):
     if not augmenter:
         raise ValueError("Augmenter cannot be None")
 
+    # Use tf.function for better performance
+    @tf.function
     def augment_map(image, label):
         def augment_wrapper(img):
             return augmenter(img)
@@ -142,6 +144,7 @@ def apply_augmentation(split, augmenter):
     
     augmented_dataset = (
         split
+        .map(augment_map, num_parallel_calls=tf.data.AUTOTUNE)
         .map(augment_map, num_parallel_calls=tf.data.AUTOTUNE)
         .prefetch(tf.data.AUTOTUNE)
     )
