@@ -8,15 +8,22 @@ import pickle
 from constants.classification.model_constants import ModelConstants
 from constants.classification.datasets_constants import DatasetConstants
 from ClassificationModel.src.utils.dataset_utils import load_dataset
-
+from utils.notification_service import NtfyNotificationService
 class CancerClassificationModel:
-    def __init__(self, dataset, input_shape):
+    def __init__(self, dataset, input_shape,model_name=ModelConstants.MODEL_NAME):
         self.dataset = dataset
+        self.notifier = NtfyNotificationService(model_name=model_name)
         self.input_shape = input_shape
         self.num_classes = dataset[DatasetConstants.NUM_CLASSES_KEY]
         self.class_names = dataset[DatasetConstants.CLASS_NAMES_KEY]
         self.model = None
         self.__build_model()
+
+    def __add_augmentation_layer(self):
+        self.model.add(layers.RandomFlip(ModelConstants.HORIZONTAL_FLIP_AUGMENTATION))
+        self.model.add(layers.RandomRotation(0.1))
+        self.model.add(layers.RandomZoom(0.1))
+        self.model.add(layers.RandomContrast(0.1))
 
     def _add_conv_block(self, filters):
         '''
@@ -31,7 +38,6 @@ class CancerClassificationModel:
             activation=ModelConstants.RELU_ACTIVATION_FUNCTION
         ))
         self.model.add(layers.BatchNormalization())
-        
         self.model.add(layers.Conv2D(
             filters=filters,
             kernel_size=(3, 3),
@@ -54,6 +60,8 @@ class CancerClassificationModel:
         """Build and compile the CNN model."""
         self.model = Sequential([layers.Input(shape=self.input_shape)])
         
+        # Data augmentation layer
+        self.__add_augmentation_layer()
         # Convolutional blocks
         self._add_conv_block(filters=32)
         self._add_conv_block(filters=64)
@@ -61,7 +69,9 @@ class CancerClassificationModel:
         
         # Flatten and dense layers
         self.model.add(layers.Flatten())
+        self.model.add(layers.Dropout(0.3))
         self._add_dense_block(units=256)
+        self._add_dense_block(units=128)
         
         self.model.add(layers.Dense(
             units=self.num_classes,
@@ -70,7 +80,7 @@ class CancerClassificationModel:
         
         # Compile model
         self.model.compile(
-            optimizer=tf.keras.optimizers.Adam(learning_rate=0.0001),
+            optimizer=tf.keras.optimizers.Adam(learning_rate=0.001),
             loss=ModelConstants.LOSS_CATEGORICAL_CROSSENTROPY,
             metrics=[
                 ModelConstants.METRIC_ACCURACY,
@@ -95,23 +105,20 @@ class CancerClassificationModel:
         
         return history
     
-    def evaluate_model(self,present_metrics=False):
+    def evaluate_model(self,present_metrics=False,send_message=False):
         test_dataset = self.dataset[DatasetConstants.TEST_SPLIT_NAME]
         
-        results = self.model.evaluate(test_dataset, verbose=1)
+        results = self.model.evaluate(test_dataset,return_dict=True, verbose=1)
         
-        metrics = {
-            ModelConstants.LOSS_METRIC: results[0],
-            ModelConstants.METRIC_ACCURACY: results[1],
-            ModelConstants.METRIC_PRECISION: results[2],
-            ModelConstants.METRIC_RECALL: results[3]
-        }
-
         if present_metrics:
-            for metric,value in metrics.items():
+            for metric,value in results.items():
                 print(f'{metric}: {value:.3f}')
         
-        return metrics
+        if send_message:
+            metrics=NtfyNotificationService.format_metrics_msg(results)
+            self.notifier.send_evaulation_results(metrics)
+
+        return results
     
     def predict(self, images):
         predictions = self.model.predict(images)
