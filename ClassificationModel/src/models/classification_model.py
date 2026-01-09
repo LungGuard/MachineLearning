@@ -20,9 +20,10 @@ class CancerClassificationModel:
         self.class_names = dataset[DatasetConstants.CLASS_NAMES_KEY]
         self.model = None
         
-        if checkpoint_path:
+        try:
             self.load_checkpoint(checkpoint_path)
-        else:
+        except FileNotFoundError as e:
+            print(f'Error : {e}')
             self.__build_model()
 
 
