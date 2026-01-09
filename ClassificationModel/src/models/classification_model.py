@@ -11,14 +11,19 @@ from ClassificationModel.src.utils.dataset_utils import load_dataset
 from utils.notification_service import NtfyNotificationService
 from ClassificationModel.src.data_processing.image_augmentation import ImageAugmentationPipeline,apply_augmentation
 class CancerClassificationModel:
-    def __init__(self, dataset, input_shape,model_name=ModelConstants.MODEL_NAME):
+    def __init__(self, dataset, input_shape, model_name=ModelConstants.MODEL_NAME, checkpoint_path=None):
+
         self.dataset = dataset
         self.notifier = NtfyNotificationService(model_name=model_name)
         self.input_shape = input_shape
         self.num_classes = dataset[DatasetConstants.NUM_CLASSES_KEY]
         self.class_names = dataset[DatasetConstants.CLASS_NAMES_KEY]
         self.model = None
-        self.__build_model()
+        
+        if checkpoint_path:
+            self.load_checkpoint(checkpoint_path)
+        else:
+            self.__build_model()
 
 
 
@@ -53,8 +58,21 @@ class CancerClassificationModel:
         ))
         self.model.add(layers.BatchNormalization())
     
+    def load_checkpoint(self, checkpoint_path):
+        """Load a saved model checkpoint.
+        """
+        checkpoint_path = Path(checkpoint_path)
+        if not checkpoint_path.exists():
+            raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
+        
+        print(f"Loading checkpoint from: {checkpoint_path}")
+        self.model = tf.keras.models.load_model(checkpoint_path)
+        print(f"✓ Model loaded successfully")
+        print(f"  Input shape: {self.model.input_shape}")
+        print(f"  Output classes: {self.model.output_shape[-1]}")
+    
     def __build_model(self):
-        """Build and compile the CNN model."""
+        """Build and compile the model."""
         self.model = Sequential([layers.Input(shape=self.input_shape)])
         
 
@@ -87,8 +105,16 @@ class CancerClassificationModel:
         )
 
 
-    def train_model(self, epochs=ModelConstants.EPOCHS,callbacks=None,augment_train=False,augmenter=None):
-        """Train the model on the dataset."""
+    def train_model(self, epochs=ModelConstants.EPOCHS,callbacks=None,augment_train=False,augmenter=None,class_weight=None):
+        """Train the model on the dataset.
+        
+        Args:
+            epochs: Number of training epochs
+            callbacks: List of Keras callbacks
+            augment_train: Whether to apply augmentation to training data
+            augmenter: ImageAugmentationPipeline instance
+            class_weight: Dictionary mapping class indices to weights for handling imbalance
+        """
         train_dataset = self.dataset[DatasetConstants.TRAIN_SPLIT_NAME]
         val_dataset = self.dataset[DatasetConstants.VAL_SPLIT_NAME]
 
@@ -102,7 +128,8 @@ class CancerClassificationModel:
             train_dataset,
             validation_data=val_dataset,
             epochs=epochs,
-            callbacks=callbacks
+            callbacks=callbacks,
+            class_weight=class_weight
         )
         
         return history
