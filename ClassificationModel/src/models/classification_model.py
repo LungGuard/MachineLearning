@@ -5,6 +5,10 @@ import numpy as np
 from tensorflow.keras.models import Sequential
 from tensorflow.keras import layers
 import pickle
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.metrics import confusion_matrix, classification_report
+from datetime import datetime
 from constants.classification.model_constants import ModelConstants
 from constants.classification.datasets_constants import DatasetConstants
 from ClassificationModel.src.utils.dataset_utils import load_dataset
@@ -74,7 +78,16 @@ class CancerClassificationModel:
     
     def __build_model(self):
         """Build and compile the model."""
-        self.model = Sequential([layers.Input(shape=self.input_shape)])
+
+        normalization_layer= tf.keras.layers.Normalization(axis=None)
+        
+        train_images=self.dataset[DatasetConstants.TRAIN_SPLIT_NAME].map(lambda x,y:x) 
+        normalization_layer.adapt(train_images)
+
+        self.model = Sequential([
+            layers.Input(shape=self.input_shape),
+            normalization_layer
+            ])
         
 
         # Convolutional blocks
@@ -135,20 +148,89 @@ class CancerClassificationModel:
         
         return history
     
-    def evaluate_model(self,present_metrics=False,send_message=False):
+    def evaluate_model(self, present_metrics=False, send_message=False, save_confusion_matrix=True):
+        """Evaluate the model on test data and optionally save confusion matrix.
+        
+        Args:
+            present_metrics: Whether to print metrics
+            send_message: Whether to send notification
+            save_confusion_matrix: Whether to save confusion matrix plot
+        
+        Returns:
+            Dictionary of evaluation metrics
+        """
         test_dataset = self.dataset[DatasetConstants.TEST_SPLIT_NAME]
         
-        results = self.model.evaluate(test_dataset,return_dict=True, verbose=1)
+        results = self.model.evaluate(test_dataset, return_dict=True, verbose=1)
         
         if present_metrics:
-            for metric,value in results.items():
+            for metric, value in results.items():
                 print(f'{metric}: {value:.3f}')
         
+        if save_confusion_matrix:
+            self._save_confusion_matrix(test_dataset)
+        
         if send_message:
-            metrics=NtfyNotificationService.format_metrics_msg(results)
+            metrics = NtfyNotificationService.format_metrics_msg(results)
             self.notifier.send_evaluation_results(metrics)
 
         return results
+    
+    def _save_confusion_matrix(self, test_dataset):
+        """Generate and save confusion matrix visualization."""
+        # Collect true labels and predictions
+        y_true = []
+        y_pred = []
+        
+        for images, labels in test_dataset:
+            predictions = self.model.predict(images, verbose=0)
+            y_true.extend(np.argmax(labels.numpy(), axis=1))
+            y_pred.extend(np.argmax(predictions, axis=1))
+        
+        y_true = np.array(y_true)
+        y_pred = np.array(y_pred)
+        
+        # Create confusion matrix
+        cm = confusion_matrix(y_true, y_pred)
+        
+        # Calculate percentages
+        cm_percent = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis] * 100
+        
+        # Create figure with two subplots
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
+        
+        # Plot 1: Raw counts
+        sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
+                    xticklabels=self.class_names, yticklabels=self.class_names,
+                    ax=ax1, cbar_kws={'label': 'Count'})
+        ax1.set_title('Confusion Matrix (Counts)', fontsize=14, fontweight='bold')
+        ax1.set_ylabel('True Label', fontsize=12)
+        ax1.set_xlabel('Predicted Label', fontsize=12)
+        
+        # Plot 2: Percentages
+        sns.heatmap(cm_percent, annot=True, fmt='.1f', cmap='Greens',
+                    xticklabels=self.class_names, yticklabels=self.class_names,
+                    ax=ax2, cbar_kws={'label': 'Percentage (%)'})
+        ax2.set_title('Confusion Matrix (Percentages)', fontsize=14, fontweight='bold')
+        ax2.set_ylabel('True Label', fontsize=12)
+        ax2.set_xlabel('Predicted Label', fontsize=12)
+        
+        plt.tight_layout()
+        
+        # Save to results folder
+        results_dir = Path('results')
+        results_dir.mkdir(parents=True, exist_ok=True)
+        
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filepath = results_dir / f'confusion_matrix_{timestamp}.png'
+        plt.savefig(filepath, dpi=300, bbox_inches='tight')
+        plt.close()
+        
+        print(f"\n✓ Confusion matrix saved to: {filepath}")
+        
+        # Print classification report
+        print("\nClassification Report:")
+        print(classification_report(y_true, y_pred, target_names=self.class_names, digits=3))
     
     def predict(self, images):
         predictions = self.model.predict(images)

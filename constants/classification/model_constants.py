@@ -15,6 +15,7 @@ class ModelConstants:
     STATE_MODEL_WEIGHTS = 'model_weights'
     STATE_MODEL_CONFIG = 'model_config'
     CHECKPOINT_DIR_PATH = Path('Checkpoints')
+    RESULTS_DIR_PATH = Path('results')
     CANCER_TYPE_RESULT_KEY = 'cancer_type'
     CONFIDENCE_KEY = 'confidence'
     MODEL_NAME = 'Cancer Classification Model'
