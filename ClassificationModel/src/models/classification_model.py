@@ -165,7 +165,7 @@ class CancerClassificationModel:
         
         if present_metrics:
             for metric, value in results.items():
-                print(f'{metric}: {value:.3f}')
+                print(f'{metric.upper()}: {value:.3f}')
         
         if save_confusion_matrix:
             self._save_confusion_matrix(test_dataset)

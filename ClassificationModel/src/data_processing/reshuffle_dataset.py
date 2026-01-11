@@ -1,7 +1,13 @@
 import os
+import sys
 import shutil
 import random
 from pathlib import Path
+
+# Add project root to Python path
+project_root = Path(__file__).parent.parent.parent.parent
+sys.path.insert(0, str(project_root))
+
 from constants.classification.datasets_constants import DatasetConstants
 # --- CONFIGURATION ---
 # The path to your CURRENT (problematic) merged dataset

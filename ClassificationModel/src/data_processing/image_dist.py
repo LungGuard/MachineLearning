@@ -112,7 +112,7 @@ def normalize_class_name(class_name):
 
 
 def main():
-    calculator = DatasetCalculator(DatasetConstants.UNIFIED_DATASET_DIR)
+    calculator = DatasetCalculator(DatasetConstants.DATASETS_DIR / 'unified_dataset_v2')
     calculator.print_dataset_statistics()
 
 
