@@ -22,6 +22,7 @@ class NotificationFields(StrEnum):
     TOPIC_NAME = "FinalsProjectNotifications"
     TRAINING_STARTED_TITLE = "Training Started!"
     TRAINING_COMPLETED_TITLE = "Training Completed!"
+    EVAL_RESULTS_TITLE="Evaluation Results"
 
 class NotificationHeaders(StrEnum):
     PRIORITY_HEADER = "Priority"

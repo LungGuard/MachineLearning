@@ -20,6 +20,11 @@ class NtfyNotificationService:
         self.base_url = base_url
         self.url = f"{base_url}/{topic_name}"
     
+    @staticmethod
+    def format_metrics_msg(metrics):
+        return "\n".join(f"{metric}: {value:.4f}" for metric, value in metrics.items())
+
+    
     def send_message(self, msg, title=None, priority=NotificationPriority.DEFAULT, tags=None):
         headers = {NotificationHeaders.PRIORITY_HEADER: priority.value}
         headers[NotificationHeaders.TITLE_HEADER] = title or str(NotificationFields.DEFAULT_TITLE)
@@ -62,3 +67,12 @@ class NtfyNotificationService:
             priority=NotificationPriority.LOW,
             tags=[NotificationTags.INFO]
         )
+    
+    def send_evaluation_results(self,metrics):
+        return self.send_message(
+            msg=metrics,
+            title=NotificationFields.EVAL_RESULTS_TITLE,
+            priority=NotificationPriority.HIGH,
+            tags=[NotificationTags.COMPLETE, NotificationTags.SUCCESS]
+        )
+    

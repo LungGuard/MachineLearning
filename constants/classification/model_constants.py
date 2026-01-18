@@ -1,5 +1,5 @@
-
-
+from pathlib import Path
+from enum import Enum
 
 class ModelConstants:
     RELU_ACTIVATION_FUNCTION='relu'
@@ -10,10 +10,12 @@ class ModelConstants:
     METRIC_ACCURACY = 'accuracy'
     METRIC_PRECISION = 'precision'
     METRIC_RECALL = 'recall'
+    METRIC_AUC = 'auc'
     EPOCHS = 100
     STATE_MODEL_WEIGHTS = 'model_weights'
     STATE_MODEL_CONFIG = 'model_config'
-    CHECKPOINT_DIR_PATH = 'ClassificationModel/src/checkpoints'
+    CHECKPOINT_DIR_PATH = Path('Checkpoints')
+    RESULTS_DIR_PATH = Path('results')
     CANCER_TYPE_RESULT_KEY = 'cancer_type'
     CONFIDENCE_KEY = 'confidence'
     MODEL_NAME = 'Cancer Classification Model'
@@ -21,3 +23,5 @@ class ModelConstants:
     TRACKED_VAL_LOSS_METRIC = 'val_loss'
     TRACKED_ACCURACY_METRIC = 'accuracy'
     TRACKED_VAL_ACCURACY_METRIC = 'val_accuracy'
+    HORIZONTAL_FLIP_AUGMENTATION = "horizontal"
+    CHECKPOINT_FILE_PATH = CHECKPOINT_DIR_PATH / 'best_model.keras'

@@ -22,11 +22,9 @@ class DatasetMerger:
         if not split_dir.exists():
             return 0
         
+        split_class_dirs_lst=list(filter(lambda class_dir: class_dir.is_dir(),split_dir.iterdir()))
         count = 0
-        for class_dir in split_dir.iterdir():
-            if not class_dir.is_dir():
-                continue
-            
+        for class_dir in split_class_dirs_lst:            
             class_name = self._base_type(class_dir.name)
             output_class_dir = self.output_dir / split / class_name
             output_class_dir.mkdir(parents=True, exist_ok=True)
