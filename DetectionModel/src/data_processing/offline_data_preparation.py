@@ -34,7 +34,7 @@ import cv2
 from sklearn.model_selection import train_test_split
 
 # Import local utilities
-from utils import (
+from utils.dataset_utils import (
     resample_volume,
     apply_windowing,
     create_25d_sandwich,
