@@ -27,14 +27,14 @@ from dataclasses import dataclass, field
 from datetime import datetime
 import hashlib
 import json
-
+import platform
 import numpy as np
 import pandas as pd
 import cv2
 from sklearn.model_selection import train_test_split
 
 # Import local utilities
-from utils.dataset_utils import (
+from utils import (
     resample_volume,
     apply_windowing,
     create_25d_sandwich,
@@ -43,8 +43,6 @@ from utils.dataset_utils import (
     get_nodule_slice_indices,
     get_nodule_centroid
 )
-
-from constants.detection.dataset_constants import RegModelConstants
 
 # Configure logging
 logging.basicConfig(
@@ -97,17 +95,148 @@ class DataPrepConfig:
 # PyLIDC Configuration Setup
 # ==============================================================================
 
+def get_pylidc_config_path() -> Path:
+    """
+    Get the pylidc configuration file path for the current operating system.
+    
+    Returns
+    -------
+    Path
+        Path to the pylidc configuration file
+    
+    Notes
+    -----
+    Configuration file locations:
+        - Windows: C:\\Users\\<username>\\.pylidcrc OR %USERPROFILE%\\.pylidcrc
+        - macOS: /Users/<username>/.pylidcrc
+        - Linux: /home/<username>/.pylidcrc
+    
+    PyLIDC also checks for 'pylidc.conf' in the current working directory
+    as a fallback, which we use if home directory writing fails.
+    """
+    
+    system = platform.system()
+    
+    # Primary location: user's home directory
+    home_config = Path.home() / ".pylidcrc"
+    
+    # Fallback: current working directory (works on all platforms)
+    local_config = Path.cwd() / "pylidc.conf"
+    
+    # On Windows, also try USERPROFILE if home() fails
+    windows_fallback = (
+        Path(os.environ.get('USERPROFILE', '')) / ".pylidcrc"
+        if system == 'Windows' and os.environ.get('USERPROFILE')
+        else None
+    )
+    
+    # Return primary path (we'll handle write failures in configure_pylidc)
+    result = home_config
+    
+    return result
+
+
+def normalize_dicom_path(dicom_path: str) -> str:
+    """
+    Normalize DICOM path for cross-platform compatibility.
+    
+    Parameters
+    ----------
+    dicom_path : str
+        User-provided path (may use Windows backslashes or Unix forward slashes)
+    
+    Notes
+    -----
+    Handles:
+        - Windows paths: E:\\folder\\subfolder or E:/folder/subfolder
+        - Unix paths: /home/user/data
+        - Relative paths: ./data or ../data
+        - Paths with spaces
+    """
+    
+    path_obj = Path(dicom_path)
+    
+    # Resolve to absolute path
+    absolute_path = path_obj.resolve()
+    
+    # Convert to string with OS-appropriate separators
+    normalized = str(absolute_path)
+    
+    # Log the normalization for debugging
+    logger.debug(f"Path normalization: '{dicom_path}' -> '{normalized}'")
+    
+    return normalized
+
+
+def validate_lidc_directory(dicom_path: str) -> Tuple[bool, str]:
+    """
+    Validate that the provided path appears to be a valid LIDC-IDRI directory.
+    
+    Parameters
+    ----------
+    dicom_path : str
+        Path to validate
+    
+    Returns
+    -------
+    Tuple[bool, str]
+        (is_valid, message) - validation result and descriptive message
+    
+    Notes
+    -----
+    Expected structure:
+        LIDC-IDRI/
+        ├── LIDC-IDRI-0001/
+        ├── LIDC-IDRI-0002/
+        └── ...
+    """
+    path_obj = Path(dicom_path)
+    
+    # Check if path exists
+    exists = path_obj.exists()
+    
+    # Check if it's a directory
+    is_dir = path_obj.is_dir() if exists else False
+    
+    # Look for patient subdirectories (LIDC-IDRI-XXXX pattern)
+    patient_dirs = (
+        list(path_obj.glob("LIDC-IDRI-*"))
+        if is_dir
+        else []
+    )
+    
+    has_patients = len(patient_dirs) > 0
+    
+    # Construct validation result
+    message = (
+        f"Valid LIDC-IDRI directory with {len(patient_dirs)} patient folders"
+        if exists and is_dir and has_patients
+        else f"Path does not exist: {dicom_path}"
+        if not exists
+        else f"Path is not a directory: {dicom_path}"
+        if not is_dir
+        else f"No LIDC-IDRI-* patient folders found in: {dicom_path}"
+    )
+    
+    is_valid = exists and is_dir and has_patients
+    
+    result = (is_valid, message)
+    
+    return result
+
+
 def configure_pylidc(dicom_path: str) -> bool:
     """
     Dynamically configure pylidc to use a custom DICOM directory.
     
-    PyLIDC looks for a configuration file at ~/.pylidcrc
-    This function creates/updates that file programmatically.
+    Cross-platform compatible (Windows, macOS, Linux).
     
     Parameters
     ----------
     dicom_path : str
         Path to the LIDC-IDRI DICOM data directory
+        Example Windows: E:\\FinalsProject\\Datasets\\...\\LIDC-IDRI
+        Example Unix: /data/LIDC-IDRI
     
     Returns
     -------
@@ -119,26 +248,75 @@ def configure_pylidc(dicom_path: str) -> bool:
     The pylidc configuration file format:
         [dicom]
         path = /path/to/LIDC-IDRI
+    
+    PyLIDC searches for configuration in this order:
+        1. ~/.pylidcrc (home directory)
+        2. pylidc.conf (current working directory)
+    
+    On Windows, paths with backslashes are automatically handled.
     """
-    config_path = Path.home() / ".pylidcrc"
+    
+    # Normalize the path for the current OS
+    normalized_path = normalize_dicom_path(dicom_path)
+    
+    # Validate the directory structure
+    is_valid, validation_message = validate_lidc_directory(normalized_path)
+    logger.info(f"LIDC directory validation: {validation_message}")
+    
+    # Warn but don't fail if validation fails (user might know what they're doing)
+    logger.warning(
+        f"Directory validation failed - proceeding anyway. "
+        f"Ensure path contains LIDC-IDRI-* patient folders."
+    ) if not is_valid else None
+    
+    # Get configuration file path
+    config_path = get_pylidc_config_path()
+    local_config_path = Path.cwd() / "pylidc.conf"
     
     # Create configuration content
     config = configparser.ConfigParser()
-    config['dicom'] = {'path': str(dicom_path)}
+    config['dicom'] = {'path': normalized_path}
     
-    # Write configuration file
+    # Attempt to write configuration
+    success = False
+    used_path = None
+    
+    # Try primary location first (home directory)
     try:
         with open(config_path, 'w') as f:
             config.write(f)
-        logger.info(f"PyLIDC configured with DICOM path: {dicom_path}")
-        
-        # Also set environment variable as backup
-        os.environ['PYLIDC_DICOM_PATH'] = str(dicom_path)
-        
+        logger.info(f"PyLIDC config written to: {config_path}")
         success = True
-    except Exception as e:
-        logger.error(f"Failed to configure pylidc: {e}")
-        success = False
+        used_path = config_path
+    except (PermissionError, OSError) as e:
+        logger.warning(f"Could not write to {config_path}: {e}")
+    
+    # Fallback to local directory if home directory failed
+    try:
+        write_local = not success
+        with open(local_config_path, 'w') as f:
+            config.write(f) if write_local else None
+        logger.info(f"PyLIDC config written to fallback: {local_config_path}") if write_local else None
+        success = success or write_local
+        used_path = local_config_path if write_local else used_path
+    except (PermissionError, OSError) as e:
+        logger.warning(f"Could not write to {local_config_path}: {e}") if not success else None
+    
+    # Also set environment variable as additional fallback
+    os.environ['PYLIDC_DICOM_PATH'] = normalized_path
+    
+    # Log final status
+    logger.info(
+        f"PyLIDC configured successfully\n"
+        f"  Config file: {used_path}\n"
+        f"  DICOM path: {normalized_path}\n"
+        f"  Platform: {platform.system()}"
+    ) if success else logger.error(
+        f"Failed to configure pylidc. "
+        f"Please manually create ~/.pylidcrc with:\n"
+        f"[dicom]\n"
+        f"path = {normalized_path}"
+    )
     
     return success
 
@@ -450,11 +628,11 @@ def process_single_scan(
             
             # Filter by diameter
             diameter_valid = (
-                config.min_nodule_diameter <= features[RegModelConstants.Features.FEATURE_DIAMETER_MM] <= config.max_nodule_diameter
+                config.min_nodule_diameter <= features['diameter_mm'] <= config.max_nodule_diameter
             )
             
             # Skip invalid nodules without using continue
-            process_nodule = diameter_valid and features[RegModelConstants.Features.FEATURE_ANNOTATION_COUNT] > 0
+            process_nodule = diameter_valid and features['annotation_count'] > 0
             
             nodule_results = []
             
@@ -478,7 +656,7 @@ def process_single_scan(
                 # Compute YOLO bounding box
                 bbox = compute_nodule_bbox_yolo(
                     centroid,
-                    features[RegModelConstants.Features.FEATURE_DIAMETER_MM],
+                    features['diameter_mm'],
                     volume_shape,
                     config.target_spacing,
                     config.bbox_padding_factor
