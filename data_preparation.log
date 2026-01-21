@@ -1,0 +1,31 @@
+2026-01-21 11:54:29,056 - INFO - Logging configured at DEBUG level
+2026-01-21 11:54:29,057 - DEBUG - Debug logging is enabled
+2026-01-21 11:54:29,057 - DEBUG - Arguments received: Namespace(data_path='E:\\FinalsProject\\Datasets\\CancerDetection\\images\\manifest-1600709154662\\LIDC-IDRI', output_dir='.\\DetectionModel\\datasets', train_ratio=0.7, val_ratio=0.15, test_ratio=0.15, min_diameter=3.0, max_diameter=100.0, slices_per_nodule=3, seed=42, debug=True)
+2026-01-21 11:54:29,057 - DEBUG - Configuration created: DataPrepConfig(data_path='E:\\FinalsProject\\Datasets\\CancerDetection\\images\\manifest-1600709154662\\LIDC-IDRI', output_dir='.\\DetectionModel\\datasets', train_ratio=0.7, val_ratio=0.15, test_ratio=0.15, target_spacing=(1.0, 1.0, 1.0), window_center=-600.0, window_width=1500.0, bbox_padding_factor=1.5, class_id=0, min_nodule_diameter=3.0, max_nodule_diameter=100.0, slices_per_nodule=3, random_seed=42)
+2026-01-21 11:54:29,058 - INFO - ============================================================
+2026-01-21 11:54:29,058 - INFO - LungGuard Data Preparation Pipeline
+2026-01-21 11:54:29,058 - INFO - ============================================================
+2026-01-21 11:54:29,058 - INFO - Step 1: Configuring PyLIDC...
+2026-01-21 11:54:29,059 - DEBUG - Path normalization: 'E:\FinalsProject\Datasets\CancerDetection\images\manifest-1600709154662\LIDC-IDRI' -> 'E:\FinalsProject\Datasets\CancerDetection\images\manifest-1600709154662\LIDC-IDRI'
+2026-01-21 11:54:29,063 - INFO - LIDC directory validation: Valid LIDC-IDRI directory with 1010 patient folders
+2026-01-21 11:54:29,064 - INFO - PyLIDC config written to: C:\Users\O\pylidc.conf
+2026-01-21 11:54:29,064 - INFO - PyLIDC configured successfully
+  Config file: C:\Users\O\pylidc.conf
+  DICOM path: E:\FinalsProject\Datasets\CancerDetection\images\manifest-1600709154662\LIDC-IDRI
+  Platform: Windows
+2026-01-21 11:54:34,071 - DEBUG - matplotlib data path: D:\FinalsProject\MachineLearning\.venv\Lib\site-packages\matplotlib\mpl-data
+2026-01-21 11:54:34,105 - DEBUG - CONFIGDIR=C:\Users\O\.matplotlib
+2026-01-21 11:54:34,108 - DEBUG - interactive is False
+2026-01-21 11:54:34,108 - DEBUG - platform is win32
+2026-01-21 11:54:34,206 - DEBUG - CACHEDIR=C:\Users\O\.matplotlib
+2026-01-21 11:54:34,216 - DEBUG - Using fontManager instance from C:\Users\O\.matplotlib\fontlist-v390.json
+2026-01-21 11:54:34,806 - INFO - Step 2: Creating directory structure...
+2026-01-21 11:54:34,807 - DEBUG - Created directory: DetectionModel\datasets\train\images
+2026-01-21 11:54:34,808 - DEBUG - Created directory: DetectionModel\datasets\train\labels
+2026-01-21 11:54:34,808 - DEBUG - Created directory: DetectionModel\datasets\val\images
+2026-01-21 11:54:34,809 - DEBUG - Created directory: DetectionModel\datasets\val\labels
+2026-01-21 11:54:34,809 - DEBUG - Created directory: DetectionModel\datasets\test\images
+2026-01-21 11:54:34,810 - DEBUG - Created directory: DetectionModel\datasets\test\labels
+2026-01-21 11:54:34,810 - DEBUG - Created directory: DetectionModel\datasets\metadata
+2026-01-21 11:54:34,810 - INFO - Directory structure created at: DetectionModel\datasets
+2026-01-21 11:54:34,811 - INFO - Step 3: Querying LIDC database for annotated scans...
