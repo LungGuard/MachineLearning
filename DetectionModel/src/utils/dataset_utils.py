@@ -4,13 +4,11 @@ LungGuard Data Preparation - Utils Module
 Pure functions for medical image manipulation.
 NO file I/O operations - this is a pure computational library.
 
-Author: LungGuard ML Team
-License: Proprietary
 """
 
 import numpy as np
 from scipy.ndimage import zoom
-from typing import Tuple, Optional
+from typing import Tuple, Optional,List
 import logging
 from constants.detection.dataset_constants import RegModelConstants
 # Configure logging
@@ -138,28 +136,6 @@ def create_25d_sandwich(
         - Red channel: slice at z_index - 1 (previous)
         - Green channel: slice at z_index (current/target)
         - Blue channel: slice at z_index + 1 (next)
-    
-    Parameters
-    ----------
-    volume : np.ndarray
-        3D numpy array of shape (Z, H, W), should be pre-windowed and normalized
-    z_index : int
-        Central slice index
-    pad_mode : str
-        Padding mode for edge slices ('edge', 'constant', 'reflect')
-    
-    Returns
-    -------
-    np.ndarray
-        2.5D RGB image of shape (H, W, 3) with values in [0, 255] uint8
-    
-    Notes
-    -----
-    Edge handling:
-        - z_index=0: uses [0, 0, 1] slices
-        - z_index=max: uses [max-1, max, max] slices
-    
-    T(N) = O(H * W) where H, W are slice dimensions
     """
     depth, height, width = volume.shape
     
@@ -196,24 +172,6 @@ def compute_nodule_bbox_yolo(
     
     YOLO format: (x_center, y_center, width, height) normalized to [0, 1]
     
-    Parameters
-    ----------
-    nodule_centroid : Tuple[float, float, float]
-        Nodule center coordinates (z, y, x) in voxel space
-    nodule_diameter : float
-        Nodule diameter in mm
-    volume_shape : Tuple[int, int, int]
-        Volume dimensions (depth, height, width)
-    spacing : Tuple[float, float, float]
-        Voxel spacing (z, y, x) in mm
-    padding_factor : float
-        Multiplicative padding for bounding box (1.5 = 50% larger)
-    
-    Returns
-    -------
-    Optional[Tuple[float, float, float, float]]
-        YOLO bbox (x_center, y_center, width, height) normalized, or None if invalid
-
     """
     depth, height, width = volume_shape
     z_spacing, y_spacing, x_spacing = spacing
@@ -264,40 +222,6 @@ def extract_nodule_features(
     
     LIDC-IDRI nodules have 1-4 independent radiologist annotations.
     This function computes consensus features using averaging.
-    
-    Parameters
-    ----------
-    annotations : list
-        List of pylidc Annotation objects for a single nodule
-    fallback_diameter : float
-        Default diameter in mm when computation fails
-    
-    Returns
-    -------
-    dict
-        Aggregated nodule features:
-        - diameter_mm: Average diameter
-        - malignancy: Average malignancy score (1-5)
-        - spiculation: Average spiculation score (1-5)
-        - lobulation: Average lobulation score (1-5)
-        - subtlety: Average subtlety score (1-5)
-        - sphericity: Average sphericity score (1-5)
-        - margin: Average margin definition (1-5)
-        - texture: Average texture score (1-5)
-        - calcification: Average calcification score (1-6)
-        - internal_structure: Average internal structure (1-4)
-        - annotation_count: Number of annotations
-    
-    Notes
-    -----
-    Malignancy interpretation:
-        1 = Highly Unlikely
-        2 = Moderately Unlikely  
-        3 = Indeterminate
-        4 = Moderately Suspicious
-        5 = Highly Suspicious
-    
-    T(N) = O(K) where K is number of annotations (typically 1-4)
     """
     # Default feature dictionary
     default_features = {
@@ -362,91 +286,99 @@ def extract_nodule_features(
 
 
 def get_nodule_slice_indices(
-    annotations: list,
-    volume_depth: int
-) -> list:
+    annotations: List,
+    volume_depth: int,
+    original_spacing: Tuple[float, float, float] = None,
+    target_spacing: Tuple[float, float, float] = (1.0, 1.0, 1.0)
+) -> List[int]:
     """
-    Get all Z-slice indices that contain the nodule across all annotations.
-    
-    Parameters
-    ----------
-    annotations : list
-        List of pylidc Annotation objects
-    volume_depth : int
-        Total number of slices in the volume
-    
-    Returns
-    -------
-    list
-        Sorted list of unique Z-indices containing the nodule
-    
-    Notes
-    -----
-    T(N) = O(K * S) where K is annotations, S is slices per annotation
+    Get valid slice indices for a nodule, transformed to resampled space.
     """
-    slice_indices = set()
+    slice_set = set()
+    
+    # Calculate Z-axis scale factor
+    z_scale = (
+        original_spacing[0] / target_spacing[0]
+        if original_spacing is not None
+        else 1.0
+    )
     
     for ann in annotations:
         try:
-            bbox = ann.bbox()
-            z_min, z_max = int(bbox[0][0]), int(bbox[0][1])
-            valid_indices = [
-                z for z in range(z_min, z_max + 1)
-                if 0 <= z < volume_depth
-            ]
-            slice_indices.update(valid_indices)
+            # Get slice indices from annotation (in original space)
+            contour_slice_indices = ann.contour_slice_indices
+            
+            # Transform each slice index to resampled space
+            for orig_idx in contour_slice_indices:
+                transformed_idx = int(round(orig_idx * z_scale))
+                is_valid = 0 <= transformed_idx < volume_depth
+                slice_set.add(transformed_idx) if is_valid else None
         except Exception:
-            pass
+            pass  # Skip failed annotations
     
-    result = sorted(list(slice_indices))
+    return sorted(list(slice_set))
+
+def transform_coordinates_to_resampled(
+    original_coords: Tuple[float, float, float],
+    original_spacing: Tuple[float, float, float],
+    target_spacing: Tuple[float, float, float] = (1.0, 1.0, 1.0)
+) -> Tuple[float, float, float]:
+    """
+    Transform coordinates from original volume space to resampled volume space.
+    """
+    scale_factors = tuple(
+        orig / tgt for orig, tgt in zip(original_spacing, target_spacing)
+    )
     
-    return result
+    transformed = tuple(
+        coord * scale for coord, scale in zip(original_coords, scale_factors)
+    )
+    
+    return transformed
 
 
 def get_nodule_centroid(
-    annotations: list,
-    volume_shape: Tuple[int, int, int]
+    annotations,
+    volume_shape: Tuple[int, int, int],
+    original_spacing: Tuple[float, float, float] = None,
+    target_spacing: Tuple[float, float, float] = (1.0, 1.0, 1.0)
 ) -> Optional[Tuple[float, float, float]]:
     """
-    Compute the average centroid of a nodule from all annotations.
-    
-    Parameters
-    ----------
-    annotations : list
-        List of pylidc Annotation objects
-    volume_shape : Tuple[int, int, int]
-        Volume dimensions (depth, height, width)
-    
-    Returns
-    -------
-    Optional[Tuple[float, float, float]]
-        Average centroid (z, y, x) in voxel coordinates, or None if invalid
-    
-    Notes
-    -----
-    T(N) = O(K) where K is number of annotations
+    Calculate nodule centroid from annotations, transformed to resampled space.
     """
-    depth, height, width = volume_shape
+    result = None
     
     centroids = []
     for ann in annotations:
         try:
-            centroid = ann.centroid
-            # Validate centroid is within bounds
-            is_valid = (
-                0 <= centroid[0] < depth and
-                0 <= centroid[1] < height and
-                0 <= centroid[2] < width
-            )
-            valid_centroids = [centroid] if is_valid else []
-            centroids.extend(valid_centroids)
+            centroid = ann.centroid  # Returns (z, y, x) in original space
+            is_valid = centroid is not None and len(centroid) == 3
+            centroids.append(centroid) if is_valid else None
         except Exception:
-            pass
+            pass  # Skip failed annotations
     
-    result = (
-        tuple(np.mean(centroids, axis=0).tolist())
-        if centroids
-        else None
-    )
+    if len(centroids) > 0:
+        # Average centroid in original space
+        avg_centroid = tuple(
+            sum(c[i] for c in centroids) / len(centroids)
+            for i in range(3)
+        )
+        
+        # Transform to resampled space if spacing provided
+        transformed_centroid = (
+            transform_coordinates_to_resampled(avg_centroid, original_spacing, target_spacing)
+            if original_spacing is not None
+            else avg_centroid
+        )
+        
+        # Validate against resampled volume bounds
+        z, y, x = transformed_centroid
+        is_within_bounds = (
+            0 <= z < volume_shape[0] and
+            0 <= y < volume_shape[1] and
+            0 <= x < volume_shape[2]
+        )
+        
+        result = transformed_centroid if is_within_bounds else None
     
     return result

@@ -1,20 +1,4 @@
-"""
-LungGuard Data Preparation - Offline Data Generator
-====================================================
-Orchestrates data generation for YOLO detection and regression analysis.
-
-This script:
-1. Configures pylidc dynamically for custom DICOM paths
-2. Generates 2.5D images for YOLO training
-3. Creates aligned metadata CSV for regression
-4. Ensures atomic operations and strict data integrity
-
-Author: LungGuard ML Team
-License: Proprietary
-
-Usage:
-    python prepare_offline_data.py --data_path /path/to/LIDC-IDRI --output_dir /path/to/output
-"""
+"""Offline data preparation pipeline."""
 
 import os
 import sys
@@ -22,349 +6,72 @@ import argparse
 import logging
 import configparser
 from pathlib import Path
-from typing import Tuple, List, Dict, Optional
-from dataclasses import dataclass, field
-from datetime import datetime
-import hashlib
-import json
-import platform
+from typing import Dict, List, Tuple
 import numpy as np
 import pandas as pd
-import cv2
-from sklearn.model_selection import train_test_split
 
-# Import local utilities
-from utils.dataset_utils import (
-    resample_volume,
-    apply_windowing,
-    create_25d_sandwich,
-    compute_nodule_bbox_yolo,
-    extract_nodule_features,
-    get_nodule_slice_indices,
-    get_nodule_centroid
-)
+# Compatibility fixes
+configparser.SafeConfigParser = configparser.ConfigParser
+np.int = np.int64
+np.float = np.float64
+np.bool = np.bool_
+np.object = np.object_
+np.str = np.str_
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(sys.stdout),
-        logging.FileHandler('data_preparation.log')
-    ]
-)
 logger = logging.getLogger(__name__)
 
 
-# ==============================================================================
-# Configuration Dataclass
-# ==============================================================================
-
-@dataclass
-class DataPrepConfig:
-    """Configuration for data preparation pipeline."""
+def setup_logging(debug: bool = False) -> None:
+    """Configure logging for all modules."""
+    log_level = logging.DEBUG if debug else logging.INFO
+    root_logger = logging.getLogger()
+    root_logger.handlers.clear()
+    root_logger.setLevel(log_level)
     
-    # Paths
-    data_path: str = "/data/LIDC-IDRI"
-    output_dir: str = "./lungguard_dataset"
-    
-    # Split ratios
-    train_ratio: float = 0.70
-    val_ratio: float = 0.15
-    test_ratio: float = 0.15
-    
-    # Image parameters
-    target_spacing: Tuple[float, float, float] = (1.0, 1.0, 1.0)
-    window_center: float = -600.0
-    window_width: float = 1500.0
-    
-    # YOLO parameters
-    bbox_padding_factor: float = 1.5
-    class_id: int = 0  # 0 = nodule/anomaly
-    
-    # Processing parameters
-    min_nodule_diameter: float = 3.0  # mm, minimum nodule size to include
-    max_nodule_diameter: float = 100.0  # mm, maximum nodule size
-    slices_per_nodule: int = 3  # Number of slices to generate per nodule
-    
-    # Random seed for reproducibility
-    random_seed: int = 42
-
-
-# ==============================================================================
-# PyLIDC Configuration Setup
-# ==============================================================================
-
-def get_pylidc_config_path() -> Path:
-    """
-    Get the pylidc configuration file path for the current operating system.
-    
-    Returns
-    -------
-    Path
-        Path to the pylidc configuration file
-    
-    Notes
-    -----
-    Configuration file locations:
-        - Windows: C:\\Users\\<username>\\.pylidcrc OR %USERPROFILE%\\.pylidcrc
-        - macOS: /Users/<username>/.pylidcrc
-        - Linux: /home/<username>/.pylidcrc
-    
-    PyLIDC also checks for 'pylidc.conf' in the current working directory
-    as a fallback, which we use if home directory writing fails.
-    """
-    
-    system = platform.system()
-    
-    # Primary location: user's home directory
-    home_config = Path.home() / ".pylidcrc"
-    
-    # Fallback: current working directory (works on all platforms)
-    local_config = Path.cwd() / "pylidc.conf"
-    
-    # On Windows, also try USERPROFILE if home() fails
-    windows_fallback = (
-        Path(os.environ.get('USERPROFILE', '')) / ".pylidcrc"
-        if system == 'Windows' and os.environ.get('USERPROFILE')
-        else None
+    log_format = (
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        if debug
+        else '%(asctime)s - %(message)s'
     )
+    formatter = logging.Formatter(log_format, datefmt='%H:%M:%S')
     
-    # Return primary path (we'll handle write failures in configure_pylidc)
-    result = home_config
+    # Create and configure console handler
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setLevel(log_level)
+    console_handler.setFormatter(formatter)
     
-    return result
+    # Create and configure file handler
+    file_handler = logging.FileHandler('data_preparation.log', mode='w')
+    file_handler.setLevel(log_level)
+    file_handler.setFormatter(formatter)
+    
+    # Add handlers to root logger
+    root_logger.addHandler(console_handler)
+    root_logger.addHandler(file_handler)
+    
+    # Suppress noisy third-party loggers
+    logging.getLogger('pylidc').setLevel(logging.WARNING)
+    logging.getLogger('PIL').setLevel(logging.WARNING)
+    logging.getLogger('matplotlib').setLevel(logging.WARNING)
+    
+    # Log confirmation
+    root_logger.info(f"Logging initialized at {'DEBUG' if debug else 'INFO'} level")
+    root_logger.debug("Debug logging is active - you should see this message")
+# Imports after logger setup
+from .config import DataPrepConfig
+from .pylidc_config import configure_pylidc, import_pylidc
+from .data_splitter import split_patients_by_id, get_patient_split
+from .scan_processor import process_single_scan
+from .dataset_writer import (
+    save_metadata_csv,
+    save_config_json,
+    save_yolo_yaml,
+    log_summary_statistics
+)
 
-
-def normalize_dicom_path(dicom_path: str) -> str:
-    """
-    Normalize DICOM path for cross-platform compatibility.
-    
-    Parameters
-    ----------
-    dicom_path : str
-        User-provided path (may use Windows backslashes or Unix forward slashes)
-    
-    Notes
-    -----
-    Handles:
-        - Windows paths: E:\\folder\\subfolder or E:/folder/subfolder
-        - Unix paths: /home/user/data
-        - Relative paths: ./data or ../data
-        - Paths with spaces
-    """
-    
-    path_obj = Path(dicom_path)
-    
-    # Resolve to absolute path
-    absolute_path = path_obj.resolve()
-    
-    # Convert to string with OS-appropriate separators
-    normalized = str(absolute_path)
-    
-    # Log the normalization for debugging
-    logger.debug(f"Path normalization: '{dicom_path}' -> '{normalized}'")
-    
-    return normalized
-
-
-def validate_lidc_directory(dicom_path: str) -> Tuple[bool, str]:
-    """
-    Validate that the provided path appears to be a valid LIDC-IDRI directory.
-    
-    Parameters
-    ----------
-    dicom_path : str
-        Path to validate
-    
-    Returns
-    -------
-    Tuple[bool, str]
-        (is_valid, message) - validation result and descriptive message
-    
-    Notes
-    -----
-    Expected structure:
-        LIDC-IDRI/
-        ├── LIDC-IDRI-0001/
-        ├── LIDC-IDRI-0002/
-        └── ...
-    """
-    path_obj = Path(dicom_path)
-    
-    # Check if path exists
-    exists = path_obj.exists()
-    
-    # Check if it's a directory
-    is_dir = path_obj.is_dir() if exists else False
-    
-    # Look for patient subdirectories (LIDC-IDRI-XXXX pattern)
-    patient_dirs = (
-        list(path_obj.glob("LIDC-IDRI-*"))
-        if is_dir
-        else []
-    )
-    
-    has_patients = len(patient_dirs) > 0
-    
-    # Construct validation result
-    message = (
-        f"Valid LIDC-IDRI directory with {len(patient_dirs)} patient folders"
-        if exists and is_dir and has_patients
-        else f"Path does not exist: {dicom_path}"
-        if not exists
-        else f"Path is not a directory: {dicom_path}"
-        if not is_dir
-        else f"No LIDC-IDRI-* patient folders found in: {dicom_path}"
-    )
-    
-    is_valid = exists and is_dir and has_patients
-    
-    result = (is_valid, message)
-    
-    return result
-
-
-def configure_pylidc(dicom_path: str) -> bool:
-    """
-    Dynamically configure pylidc to use a custom DICOM directory.
-    
-    Cross-platform compatible (Windows, macOS, Linux).
-    
-    Parameters
-    ----------
-    dicom_path : str
-        Path to the LIDC-IDRI DICOM data directory
-        Example Windows: E:\\FinalsProject\\Datasets\\...\\LIDC-IDRI
-        Example Unix: /data/LIDC-IDRI
-    
-    Returns
-    -------
-    bool
-        True if configuration was successful
-    
-    Notes
-    -----
-    The pylidc configuration file format:
-        [dicom]
-        path = /path/to/LIDC-IDRI
-    
-    PyLIDC searches for configuration in this order:
-        1. ~/.pylidcrc (home directory)
-        2. pylidc.conf (current working directory)
-    
-    On Windows, paths with backslashes are automatically handled.
-    """
-    
-    # Normalize the path for the current OS
-    normalized_path = normalize_dicom_path(dicom_path)
-    
-    # Validate the directory structure
-    is_valid, validation_message = validate_lidc_directory(normalized_path)
-    logger.info(f"LIDC directory validation: {validation_message}")
-    
-    # Warn but don't fail if validation fails (user might know what they're doing)
-    logger.warning(
-        f"Directory validation failed - proceeding anyway. "
-        f"Ensure path contains LIDC-IDRI-* patient folders."
-    ) if not is_valid else None
-    
-    # Get configuration file path
-    config_path = get_pylidc_config_path()
-    local_config_path = Path.cwd() / "pylidc.conf"
-    
-    # Create configuration content
-    config = configparser.ConfigParser()
-    config['dicom'] = {'path': normalized_path}
-    
-    # Attempt to write configuration
-    success = False
-    used_path = None
-    
-    # Try primary location first (home directory)
-    try:
-        with open(config_path, 'w') as f:
-            config.write(f)
-        logger.info(f"PyLIDC config written to: {config_path}")
-        success = True
-        used_path = config_path
-    except (PermissionError, OSError) as e:
-        logger.warning(f"Could not write to {config_path}: {e}")
-    
-    # Fallback to local directory if home directory failed
-    try:
-        write_local = not success
-        with open(local_config_path, 'w') as f:
-            config.write(f) if write_local else None
-        logger.info(f"PyLIDC config written to fallback: {local_config_path}") if write_local else None
-        success = success or write_local
-        used_path = local_config_path if write_local else used_path
-    except (PermissionError, OSError) as e:
-        logger.warning(f"Could not write to {local_config_path}: {e}") if not success else None
-    
-    # Also set environment variable as additional fallback
-    os.environ['PYLIDC_DICOM_PATH'] = normalized_path
-    
-    # Log final status
-    logger.info(
-        f"PyLIDC configured successfully\n"
-        f"  Config file: {used_path}\n"
-        f"  DICOM path: {normalized_path}\n"
-        f"  Platform: {platform.system()}"
-    ) if success else logger.error(
-        f"Failed to configure pylidc. "
-        f"Please manually create ~/.pylidcrc with:\n"
-        f"[dicom]\n"
-        f"path = {normalized_path}"
-    )
-    
-    return success
-
-
-def import_pylidc():
-    """
-    Import pylidc after configuration.
-    
-    Returns
-    -------
-    module
-        The pylidc module
-    """
-    import pylidc as pl
-    return pl
-
-
-# ==============================================================================
-# Directory Structure Creation
-# ==============================================================================
 
 def create_directory_structure(output_dir: str) -> Dict[str, Path]:
-    """
-    Create the required directory structure for YOLO training.
-    
-    Structure:
-        output_dir/
-        ├── train/
-        │   ├── images/
-        │   └── labels/
-        ├── val/
-        │   ├── images/
-        │   └── labels/
-        ├── test/
-        │   ├── images/
-        │   └── labels/
-        └── metadata/
-    
-    Parameters
-    ----------
-    output_dir : str
-        Root output directory
-    
-    Returns
-    -------
-    Dict[str, Path]
-        Dictionary mapping split names to their paths
-    """
+    """Create YOLO directory structure."""
     base_path = Path(output_dir)
     
     directories = {
@@ -377,618 +84,156 @@ def create_directory_structure(output_dir: str) -> Dict[str, Path]:
         'metadata': base_path / 'metadata'
     }
     
-    # Create all directories
     for name, path in directories.items():
         path.mkdir(parents=True, exist_ok=True)
-        logger.debug(f"Created directory: {path}")
     
-    logger.info(f"Directory structure created at: {base_path}")
-    
+    logger.info(f"Output directory: {base_path}")
     return directories
 
 
-# ==============================================================================
-# Patient Split Logic
-# ==============================================================================
-
-def split_patients_by_id(
-    patient_ids: List[str],
-    config: DataPrepConfig
-) -> Dict[str, List[str]]:
-    """
-    Split patient IDs into train/val/test sets.
+def filter_scans_with_nodules(all_scans: List, pl) -> List[Tuple]:
+    """Filter scans with nodule annotations."""
+    total = len(all_scans)
+    logger.info(f"Filtering {total} scans for nodule annotations...")
     
-    CRITICAL: Split by patient ID to prevent data leakage.
-    A patient's data must exist in ONLY one split.
+    scans_with_nodules = []
     
-    Parameters
-    ----------
-    patient_ids : List[str]
-        List of unique patient identifiers
-    config : DataPrepConfig
-        Configuration with split ratios
-    
-    Returns
-    -------
-    Dict[str, List[str]]
-        Dictionary with 'train', 'val', 'test' keys mapping to patient IDs
-    """
-    # First split: train vs (val + test)
-    train_ids, temp_ids = train_test_split(
-        patient_ids,
-        train_size=config.train_ratio,
-        random_state=config.random_seed
-    )
-    
-    # Second split: val vs test (from remaining)
-    val_ratio_adjusted = config.val_ratio / (config.val_ratio + config.test_ratio)
-    val_ids, test_ids = train_test_split(
-        temp_ids,
-        train_size=val_ratio_adjusted,
-        random_state=config.random_seed
-    )
-    
-    splits = {
-        'train': list(train_ids),
-        'val': list(val_ids),
-        'test': list(test_ids)
-    }
-    
-    logger.info(
-        f"Patient split - Train: {len(train_ids)}, "
-        f"Val: {len(val_ids)}, Test: {len(test_ids)}"
-    )
-    
-    return splits
-
-
-def get_patient_split(patient_id: str, splits: Dict[str, List[str]]) -> str:
-    """
-    Determine which split a patient belongs to.
-    
-    Parameters
-    ----------
-    patient_id : str
-        Patient identifier
-    splits : Dict[str, List[str]]
-        Split dictionary from split_patients_by_id
-    
-    Returns
-    -------
-    str
-        Split name ('train', 'val', or 'test')
-    """
-    split_mapping = {
-        pid: split_name
-        for split_name, pids in splits.items()
-        for pid in pids
-    }
-    
-    result = split_mapping.get(patient_id, 'train')  # Default to train if not found
-    
-    return result
-
-
-# ==============================================================================
-# Atomic Save Operations
-# ==============================================================================
-
-@dataclass
-class AtomicSaveResult:
-    """Result of an atomic save operation."""
-    success: bool
-    image_path: Optional[str] = None
-    label_path: Optional[str] = None
-    error_message: Optional[str] = None
-
-
-def atomic_save_image_and_label(
-    image: np.ndarray,
-    yolo_bbox: Tuple[float, float, float, float],
-    class_id: int,
-    image_path: Path,
-    label_path: Path
-) -> AtomicSaveResult:
-    """
-    Atomically save image and corresponding YOLO label.
-    
-    CRITICAL: Label is saved ONLY if image save succeeds.
-    This ensures 1:1 alignment between images and labels.
-    
-    Parameters
-    ----------
-    image : np.ndarray
-        2.5D RGB image to save
-    yolo_bbox : Tuple[float, float, float, float]
-        YOLO format bbox (x_center, y_center, width, height)
-    class_id : int
-        Object class ID for YOLO
-    image_path : Path
-        Destination path for image
-    label_path : Path
-        Destination path for label
-    
-    Returns
-    -------
-    AtomicSaveResult
-        Result indicating success/failure and paths
-    """
-    result = AtomicSaveResult(success=False)
-    
-    # Attempt image save
-    try:
-        # Convert RGB to BGR for OpenCV
-        image_bgr = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
-        save_success = cv2.imwrite(str(image_path), image_bgr)
+    for idx, scan in enumerate(all_scans):
+        # Progress indicator every 100 scans
+        show_progress = (idx + 1) % 100 == 0 or idx == total - 1
+        print(f"\r  Checking scan {idx + 1}/{total}...", end='', flush=True) if show_progress else None
         
-        image_saved = save_success and image_path.exists()
-    except Exception as e:
-        logger.error(f"Image save failed: {e}")
-        image_saved = False
+        try:
+            annotations = scan.cluster_annotations()
+            has_nodules = len(annotations) > 0
+            scans_with_nodules.append((scan, annotations)) if has_nodules else None
+        except Exception as e:
+            logger.debug(f"Error checking {scan.patient_id}: {e}")
     
-    # Save label ONLY if image save succeeded
-    try:
-        label_content = (
-            f"{class_id} "
-            f"{yolo_bbox[0]:.6f} "
-            f"{yolo_bbox[1]:.6f} "
-            f"{yolo_bbox[2]:.6f} "
-            f"{yolo_bbox[3]:.6f}\n"
-        )
-        
-        # Write label file only if image was saved
-        write_label = image_saved
-        
-        label_saved = False
-        with open(label_path, 'w') as f:
-            f.write(label_content) if write_label else None
-            label_saved = write_label
-            
-    except Exception as e:
-        logger.error(f"Label save failed: {e}")
-        label_saved = False
-        # Rollback: delete image if label failed
-        image_path.unlink() if image_saved and image_path.exists() else None
-        image_saved = False
-    
-    result = AtomicSaveResult(
-        success=image_saved and label_saved,
-        image_path=str(image_path) if image_saved else None,
-        label_path=str(label_path) if label_saved else None,
-        error_message=None if (image_saved and label_saved) else "Save operation failed"
-    )
-    
-    return result
+    print()  # New line after progress
+    logger.info(f"Found {len(scans_with_nodules)} scans with nodules")
+    return scans_with_nodules
 
-
-# ==============================================================================
-# Scan Processing
-# ==============================================================================
-
-def process_single_scan(
-    scan,
-    split: str,
-    config: DataPrepConfig,
-    directories: Dict[str, Path],
-    pl_module
-) -> List[Dict]:
-    """
-    Process a single CT scan and extract nodule data.
-    
-    Parameters
-    ----------
-    scan : pylidc.Scan
-        LIDC scan object
-    split : str
-        Data split ('train', 'val', 'test')
-    config : DataPrepConfig
-        Processing configuration
-    directories : Dict[str, Path]
-        Output directory paths
-    pl_module : module
-        PyLIDC module reference
-    
-    Returns
-    -------
-    List[Dict]
-        List of metadata dictionaries for successfully saved nodules
-    """
-    metadata_rows = []
-    
-    try:
-        # Load and preprocess the volume
-        volume = scan.to_volume()
-        spacing = scan.pixel_spacing  # (row_spacing, col_spacing)
-        slice_spacing = scan.slice_spacing
-        
-        original_spacing = (slice_spacing, spacing[0], spacing[1])
-        
-        # Resample to isotropic
-        resampled = resample_volume(volume, original_spacing, config.target_spacing)
-        
-        # Apply lung windowing
-        windowed = apply_windowing(
-            resampled, 
-            config.window_center, 
-            config.window_width
-        )
-        
-        volume_shape = windowed.shape
-        patient_id = scan.patient_id
-        
-        # Get clustered nodules (nodules agreed upon by multiple radiologists)
-        nodules = scan.cluster_annotations()
-        
-        logger.debug(f"Processing {patient_id}: {len(nodules)} nodule clusters")
-        
-        # Process each nodule cluster
-        for nodule_idx, annotations in enumerate(nodules):
-            # Extract features from annotations
-            features = extract_nodule_features(annotations)
-            
-            # Filter by diameter
-            diameter_valid = (
-                config.min_nodule_diameter <= features['diameter_mm'] <= config.max_nodule_diameter
-            )
-            
-            # Skip invalid nodules without using continue
-            process_nodule = diameter_valid and features['annotation_count'] > 0
-            
-            nodule_results = []
-            
-            # Get centroid for this nodule cluster
-            centroid = get_nodule_centroid(annotations, volume_shape) if process_nodule else None
-            
-            # Get slice indices containing the nodule
-            slice_indices = get_nodule_slice_indices(annotations, volume_shape[0]) if process_nodule else []
-            
-            # Select representative slices (center + neighbors)
-            selected_slices = _select_representative_slices(
-                slice_indices, 
-                config.slices_per_nodule
-            ) if slice_indices else []
-            
-            # Process each selected slice
-            for slice_idx in selected_slices:
-                # Create 2.5D image
-                image_25d = create_25d_sandwich(windowed, slice_idx)
-                
-                # Compute YOLO bounding box
-                bbox = compute_nodule_bbox_yolo(
-                    centroid,
-                    features['diameter_mm'],
-                    volume_shape,
-                    config.target_spacing,
-                    config.bbox_padding_factor
-                ) if centroid else None
-                
-                # Generate unique filename
-                filename = f"{patient_id}_n{nodule_idx:02d}_z{slice_idx:04d}"
-                
-                # Determine output paths based on split
-                image_dir = directories[f'{split}_images']
-                label_dir = directories[f'{split}_labels']
-                
-                image_path = image_dir / f"{filename}.jpg"
-                label_path = label_dir / f"{filename}.txt"
-                
-                # Atomic save
-                save_result = atomic_save_image_and_label(
-                    image_25d,
-                    bbox,
-                    config.class_id,
-                    image_path,
-                    label_path
-                ) if bbox else AtomicSaveResult(success=False)
-                
-                # Create metadata row ONLY if save succeeded
-                metadata_entry = {
-                    'filename': filename,
-                    'patient_id': patient_id,
-                    'split_group': split,
-                    'nodule_index': nodule_idx,
-                    'slice_index': slice_idx,
-                    'diameter_mm': features['diameter_mm'],
-                    'malignancy_score': features['malignancy'],
-                    'spiculation': features['spiculation'],
-                    'lobulation': features['lobulation'],
-                    'subtlety': features['subtlety'],
-                    'sphericity': features['sphericity'],
-                    'margin': features['margin'],
-                    'texture': features['texture'],
-                    'calcification': features['calcification'],
-                    'internal_structure': features['internal_structure'],
-                    'annotation_count': features['annotation_count'],
-                    'centroid_z': centroid[0] if centroid else None,
-                    'centroid_y': centroid[1] if centroid else None,
-                    'centroid_x': centroid[2] if centroid else None,
-                    'bbox_x': bbox[0] if bbox else None,
-                    'bbox_y': bbox[1] if bbox else None,
-                    'bbox_w': bbox[2] if bbox else None,
-                    'bbox_h': bbox[3] if bbox else None,
-                    'image_path': save_result.image_path,
-                    'label_path': save_result.label_path,
-                    'volume_depth': volume_shape[0],
-                    'volume_height': volume_shape[1],
-                    'volume_width': volume_shape[2]
-                } if save_result.success else None
-                
-                # Append only successful entries
-                nodule_results.append(metadata_entry) if metadata_entry else None
-            
-            metadata_rows.extend([r for r in nodule_results if r is not None])
-            
-    except Exception as e:
-        logger.error(f"Error processing scan: {e}")
-    
-    return metadata_rows
-
-
-def _select_representative_slices(
-    slice_indices: List[int],
-    num_slices: int
-) -> List[int]:
-    """
-    Select representative slices from a nodule's slice range.
-    
-    Strategy: Select center slice and evenly distributed neighbors.
-    
-    Parameters
-    ----------
-    slice_indices : List[int]
-        All slice indices containing the nodule
-    num_slices : int
-        Number of slices to select
-    
-    Returns
-    -------
-    List[int]
-        Selected slice indices
-    """
-    total_slices = len(slice_indices)
-    
-    # Handle edge cases
-    result = (
-        slice_indices
-        if total_slices <= num_slices
-        else [
-            slice_indices[int(i * (total_slices - 1) / (num_slices - 1))]
-            for i in range(num_slices)
-        ] if num_slices > 1
-        else [slice_indices[total_slices // 2]]
-    )
-    
-    return result
-
-
-# ==============================================================================
-# Main Processing Pipeline
-# ==============================================================================
 
 def run_data_preparation(config: DataPrepConfig) -> Path:
-    """
-    Execute the full data preparation pipeline.
+    """Execute the data preparation pipeline."""
     
-    Parameters
-    ----------
-    config : DataPrepConfig
-        Pipeline configuration
-    
-    Returns
-    -------
-    Path
-        Path to the generated metadata CSV
-    """
-    logger.info("=" * 60)
+    logger.info("=" * 50)
     logger.info("LungGuard Data Preparation Pipeline")
-    logger.info("=" * 60)
+    logger.info("=" * 50)
     
     # Step 1: Configure pylidc
-    logger.info("Step 1: Configuring PyLIDC...")
+    logger.info("[1/6] Configuring PyLIDC...")
     configure_pylidc(config.data_path)
     pl = import_pylidc()
     
-    # Step 2: Create directory structure
-    logger.info("Step 2: Creating directory structure...")
+    # Step 2: Create directories
+    logger.info("[2/6] Creating directories...")
     directories = create_directory_structure(config.output_dir)
     
-    # Step 3: Query all scans with annotations
-    logger.info("Step 3: Querying LIDC database for annotated scans...")
+    # Step 3: Query and filter scans (OPTIMIZED - single pass)
+    logger.info("[3/6] Querying LIDC database...")
     all_scans = pl.query(pl.Scan).all()
+    logger.info(f"Total scans in database: {len(all_scans)}")
     
-    # Filter scans with nodule annotations
-    scans_with_nodules = [
-        scan for scan in all_scans
-        if len(scan.cluster_annotations()) > 0
-    ]
+    # Filter scans and keep annotations (avoids calling cluster_annotations twice)
+    scans_with_annotations = filter_scans_with_nodules(all_scans, pl)
     
-    logger.info(f"Found {len(scans_with_nodules)} scans with nodule annotations")
+    if len(scans_with_annotations) == 0:
+        logger.error("No scans with nodule annotations found!")
+        csv_path = directories['metadata'] / 'regression_dataset.csv'
+        pd.DataFrame().to_csv(csv_path, index=False)
+        return csv_path
     
-    # Step 4: Get unique patient IDs and split
-    logger.info("Step 4: Splitting patients into train/val/test...")
-    patient_ids = list(set(scan.patient_id for scan in scans_with_nodules))
-    splits = split_patients_by_id(patient_ids, config)
+    # Step 4: Split patients
+    logger.info("[4/6] Splitting patients...")
+    patient_ids = list(set(scan.patient_id for scan, _ in scans_with_annotations))
+    logger.info(f"Unique patients: {len(patient_ids)}")
     
-    # Step 5: Process all scans
-    logger.info("Step 5: Processing scans and generating data...")
+    splits = split_patients_by_id(
+        patient_ids,
+        config.train_ratio,
+        config.val_ratio,
+        config.test_ratio,
+        config.random_seed
+    )
+    
+    # Step 5: Process scans
+    logger.info("[5/6] Processing scans...")
     all_metadata = []
+    successful = 0
+    failed = 0
+    total_scans = len(scans_with_annotations)
     
-    total_scans = len(scans_with_nodules)
-    for idx, scan in enumerate(scans_with_nodules):
+    for idx, (scan, annotations) in enumerate(scans_with_annotations):
         patient_id = scan.patient_id
         split = get_patient_split(patient_id, splits)
         
-        # Log progress every 10 scans
-        log_progress = (idx + 1) % 10 == 0 or idx == 0 or idx == total_scans - 1
-        logger.info(
-            f"Processing scan {idx + 1}/{total_scans}: {patient_id} ({split})"
-        ) if log_progress else None
+        # Progress display
+        show_progress = (idx + 1) % config.log_freq == 0 or idx == 0 or idx == total_scans - 1
+        logger.info(f"  [{idx + 1}/{total_scans}] {patient_id} ({split})") if show_progress else None
         
-        # Process scan and collect metadata
-        scan_metadata = process_single_scan(
-            scan, split, config, directories, pl
-        )
-        all_metadata.extend(scan_metadata)
+        try:
+            scan_metadata = process_single_scan(
+                scan, split, config, directories, pl
+            )
+            
+            samples_generated = len(scan_metadata)
+            all_metadata.extend(scan_metadata) if samples_generated > 0 else None
+            successful += 1 if samples_generated > 0 else 0
+            failed += 1 if samples_generated == 0 else 0
+            
+            logger.debug(f"    -> {samples_generated} samples") if samples_generated > 0 else None
+            
+        except Exception as e:
+            failed += 1
+            logger.error(f"  [{patient_id}] Error: {e}")
+            logger.debug(f"Traceback:", exc_info=True)
     
-    # Step 6: Create and save metadata CSV
-    logger.info("Step 6: Saving metadata CSV...")
-    metadata_df = pd.DataFrame(all_metadata)
+    logger.info(f"Processing complete: {successful} OK, {failed} failed")
+    logger.info(f"Total samples: {len(all_metadata)}")
     
+    # Step 6: Save outputs
+    logger.info("[6/6] Saving outputs...")
     csv_path = directories['metadata'] / 'regression_dataset.csv'
-    metadata_df.to_csv(csv_path, index=False)
-    
-    # Save configuration for reproducibility
-    config_dict = {
-        'data_path': config.data_path,
-        'output_dir': config.output_dir,
-        'train_ratio': config.train_ratio,
-        'val_ratio': config.val_ratio,
-        'test_ratio': config.test_ratio,
-        'target_spacing': config.target_spacing,
-        'window_center': config.window_center,
-        'window_width': config.window_width,
-        'bbox_padding_factor': config.bbox_padding_factor,
-        'min_nodule_diameter': config.min_nodule_diameter,
-        'max_nodule_diameter': config.max_nodule_diameter,
-        'slices_per_nodule': config.slices_per_nodule,
-        'random_seed': config.random_seed,
-        'generation_timestamp': datetime.now().isoformat(),
-        'total_samples': len(metadata_df),
-        'train_samples': len(metadata_df[metadata_df['split_group'] == 'train']),
-        'val_samples': len(metadata_df[metadata_df['split_group'] == 'val']),
-        'test_samples': len(metadata_df[metadata_df['split_group'] == 'test'])
-    }
+    metadata_df = save_metadata_csv(all_metadata, csv_path)
     
     config_path = directories['metadata'] / 'preparation_config.json'
-    with open(config_path, 'w') as f:
-        json.dump(config_dict, f, indent=2)
+    config_dict = save_config_json(config, config_path, metadata_df)
     
-    # Generate summary statistics
-    logger.info("=" * 60)
-    logger.info("Data Preparation Complete!")
-    logger.info("=" * 60)
-    logger.info(f"Total samples generated: {len(metadata_df)}")
-    logger.info(f"  - Train: {config_dict['train_samples']}")
-    logger.info(f"  - Val: {config_dict['val_samples']}")
-    logger.info(f"  - Test: {config_dict['test_samples']}")
-    logger.info(f"Metadata CSV: {csv_path}")
-    logger.info(f"Configuration: {config_path}")
+    yaml_path = save_yolo_yaml(config.output_dir, metadata_df)
     
-    # Create YOLO dataset.yaml for training
-    yaml_content = f"""# LungGuard YOLO Dataset Configuration
-# Auto-generated by prepare_offline_data.py
-
-path: {config.output_dir}
-train: train/images
-val: val/images
-test: test/images
-
-nc: 1  # Number of classes
-names:
-  0: nodule
-
-# Dataset statistics
-# Total images: {len(metadata_df)}
-# Train: {config_dict['train_samples']}
-# Val: {config_dict['val_samples']}
-# Test: {config_dict['test_samples']}
-"""
-    
-    yaml_path = Path(config.output_dir) / 'dataset.yaml'
-    with open(yaml_path, 'w') as f:
-        f.write(yaml_content)
-    
-    logger.info(f"YOLO dataset.yaml: {yaml_path}")
+    log_summary_statistics(metadata_df, config_dict, csv_path, config_path, yaml_path)
     
     return csv_path
 
 
-# ==============================================================================
-# Entry Point
-# ==============================================================================
-
 def main():
-    """Main entry point with argument parsing."""
+    """Main entry point."""
     parser = argparse.ArgumentParser(
-        description='LungGuard Data Preparation Pipeline',
+        description='LungGuard Data Preparation',
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
     
-    parser.add_argument(
-        '--data_path',
-        type=str,
-        default='/data/LIDC-IDRI',
-        help='Path to LIDC-IDRI DICOM data'
-    )
-    
-    parser.add_argument(
-        '--output_dir',
-        type=str,
-        default='./lungguard_dataset',
-        help='Output directory for generated data'
-    )
-    
-    parser.add_argument(
-        '--train_ratio',
-        type=float,
-        default=0.70,
-        help='Training set ratio'
-    )
-    
-    parser.add_argument(
-        '--val_ratio',
-        type=float,
-        default=0.15,
-        help='Validation set ratio'
-    )
-    
-    parser.add_argument(
-        '--test_ratio',
-        type=float,
-        default=0.15,
-        help='Test set ratio'
-    )
-    
-    parser.add_argument(
-        '--min_diameter',
-        type=float,
-        default=3.0,
-        help='Minimum nodule diameter (mm)'
-    )
-    
-    parser.add_argument(
-        '--max_diameter',
-        type=float,
-        default=100.0,
-        help='Maximum nodule diameter (mm)'
-    )
-    
-    parser.add_argument(
-        '--slices_per_nodule',
-        type=int,
-        default=3,
-        help='Number of slices to generate per nodule'
-    )
-    
-    parser.add_argument(
-        '--seed',
-        type=int,
-        default=42,
-        help='Random seed for reproducibility'
-    )
-    
-    parser.add_argument(
-        '--debug',
-        action='store_true',
-        help='Enable debug logging'
-    )
+    parser.add_argument('--data_path', type=str, required=True, help='Path to LIDC-IDRI')
+    parser.add_argument('--output_dir', type=str, default='./lungguard_dataset', help='Output directory')
+    parser.add_argument('--train_ratio', type=float, default=0.70)
+    parser.add_argument('--val_ratio', type=float, default=0.15)
+    parser.add_argument('--test_ratio', type=float, default=0.15)
+    parser.add_argument('--min_diameter', type=float, default=3.0, help='Min nodule diameter (mm)')
+    parser.add_argument('--max_diameter', type=float, default=100.0, help='Max nodule diameter (mm)')
+    parser.add_argument('--slices_per_nodule', type=int, default=3)
+    parser.add_argument('--seed', type=int, default=42)
+    parser.add_argument('--debug', action='store_true', help='Enable debug logging')
+    parser.add_argument('--log_freq', type=int, default=10, help='Log every N scans')
     
     args = parser.parse_args()
     
-    # Set debug logging if requested
-    logger.setLevel(logging.DEBUG) if args.debug else None
+    # Setup logging FIRST
+    setup_logging(debug=args.debug)
     
-    # Create configuration
+    logger.debug(f"Arguments: {args}") if args.debug else None
+    
     config = DataPrepConfig(
         data_path=args.data_path,
         output_dir=args.output_dir,
@@ -998,17 +243,12 @@ def main():
         min_nodule_diameter=args.min_diameter,
         max_nodule_diameter=args.max_diameter,
         slices_per_nodule=args.slices_per_nodule,
-        random_seed=args.seed
+        random_seed=args.seed,
+        log_freq=args.log_freq
     )
     
-    # Run pipeline
     csv_path = run_data_preparation(config)
-    
     return csv_path
 
-
-# ==============================================================================
-# Script Execution
-# ==============================================================================
 
 result_path = main() if __name__ == "__main__" else None

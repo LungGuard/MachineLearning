@@ -30,3 +30,4 @@ checkpoints/*
 .ipynb_checkpoints/
 
 *.keras
+data_preparation.log
