@@ -1,12 +1,4 @@
-"""
-Atomic File I/O Operations
-===========================
-Transactional file saving operations for image and label pairs.
-
-This module ensures that YOLO image and label files are saved atomically,
-maintaining strict 1:1 alignment between images and their annotations.
-
-"""
+"""Atomic file I/O for image/label pairs."""
 
 import logging
 from pathlib import Path
@@ -20,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class AtomicSaveResult:
-    """Result of an atomic save operation."""
+    """Save operation result."""
     success: bool
     image_path: Optional[str] = None
     label_path: Optional[str] = None
@@ -34,30 +26,7 @@ def atomic_save_image_and_label(
     image_path: Path,
     label_path: Path
 ) -> AtomicSaveResult:
-    """
-    Atomically save image and corresponding YOLO label.
-    
-    CRITICAL: Label is saved ONLY if image save succeeds.
-    This ensures 1:1 alignment between images and labels.
-    
-    Parameters
-    ----------
-    image : np.ndarray
-        2.5D RGB image to save
-    yolo_bbox : Tuple[float, float, float, float]
-        YOLO format bbox (x_center, y_center, width, height)
-    class_id : int
-        Object class ID for YOLO
-    image_path : Path
-        Destination path for image
-    label_path : Path
-        Destination path for label
-    
-    Returns
-    -------
-    AtomicSaveResult
-        Result indicating success/failure and paths
-    """
+    """Save image and label atomically (label only if image succeeds)."""
     result = AtomicSaveResult(success=False)
     
     # Attempt image save

@@ -1,12 +1,4 @@
-"""
-Data Splitting Utilities
-=========================
-Patient-level data splitting to prevent data leakage.
-
-This module ensures that all data from a single patient stays in one split
-(train, validation, or test) to maintain proper evaluation integrity.
-
-"""
+"""Patient-level data splitting."""
 
 import logging
 from typing import List, Dict
@@ -22,30 +14,7 @@ def split_patients_by_id(
     test_ratio: float,
     random_seed: int = 42
 ) -> Dict[str, List[str]]:
-    """
-    Split patient IDs into train/val/test sets.
-    
-    CRITICAL: Split by patient ID to prevent data leakage.
-    A patient's data must exist in ONLY one split.
-    
-    Parameters
-    ----------
-    patient_ids : List[str]
-        List of unique patient identifiers
-    train_ratio : float
-        Proportion of data for training (e.g., 0.70)
-    val_ratio : float
-        Proportion of data for validation (e.g., 0.15)
-    test_ratio : float
-        Proportion of data for testing (e.g., 0.15)
-    random_seed : int, optional
-        Random seed for reproducibility
-    
-    Returns
-    -------
-    Dict[str, List[str]]
-        Dictionary with 'train', 'val', 'test' keys mapping to patient IDs
-    """
+    """Split patient IDs into train/val/test sets."""
     # First split: train vs (val + test)
     train_ids, temp_ids = train_test_split(
         patient_ids,
@@ -76,21 +45,7 @@ def split_patients_by_id(
 
 
 def get_patient_split(patient_id: str, splits: Dict[str, List[str]]) -> str:
-    """
-    Determine which split a patient belongs to.
-    
-    Parameters
-    ----------
-    patient_id : str
-        Patient identifier
-    splits : Dict[str, List[str]]
-        Split dictionary from split_patients_by_id
-    
-    Returns
-    -------
-    str
-        Split name ('train', 'val', or 'test')
-    """
+    """Get which split a patient belongs to."""
     split_mapping = {
         pid: split_name
         for split_name, pids in splits.items()

@@ -1,9 +1,4 @@
-"""
-Data Preparation Configuration
-================================
-Configuration dataclass for the offline data preparation pipeline.
-
-"""
+"""Data preparation configuration."""
 
 from dataclasses import dataclass
 from typing import Tuple
@@ -11,7 +6,7 @@ from typing import Tuple
 
 @dataclass
 class DataPrepConfig:
-    """Configuration for data preparation pipeline."""
+    """Pipeline configuration parameters."""
     
     # Paths
     data_path: str = "/data/LIDC-IDRI"

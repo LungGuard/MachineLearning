@@ -1,8 +1,4 @@
-"""
-LungGuard Data Preparation - Offline Data Generator
-================================================================
-Orchestrates data generation for YOLO detection and regression analysis.
-"""
+"""Offline data preparation pipeline."""
 
 import os
 import sys
@@ -14,7 +10,7 @@ from typing import Dict, List, Tuple
 import numpy as np
 import pandas as pd
 
-# Compatibility fixes for older libraries
+# Compatibility fixes
 configparser.SafeConfigParser = configparser.ConfigParser
 np.int = np.int64
 np.float = np.float64
@@ -22,43 +18,45 @@ np.bool = np.bool_
 np.object = np.object_
 np.str = np.str_
 
-# Create logger
 logger = logging.getLogger(__name__)
 
 
 def setup_logging(debug: bool = False) -> None:
-    """Configure logging with appropriate level."""
+    """Configure logging for all modules."""
     log_level = logging.DEBUG if debug else logging.INFO
-    
-    # Clear existing handlers
     root_logger = logging.getLogger()
     root_logger.handlers.clear()
+    root_logger.setLevel(log_level)
     
-    # Simple format for cleaner output
     log_format = (
-        '%(asctime)s - %(levelname)s - %(message)s'
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
         if debug
         else '%(asctime)s - %(message)s'
     )
+    formatter = logging.Formatter(log_format, datefmt='%H:%M:%S')
     
-    logging.basicConfig(
-        level=log_level,
-        format=log_format,
-        datefmt='%H:%M:%S',
-        handlers=[
-            logging.StreamHandler(sys.stdout),
-            logging.FileHandler('data_preparation.log', mode='w')
-        ],
-        force=True
-    )
+    # Create and configure console handler
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setLevel(log_level)
+    console_handler.setFormatter(formatter)
     
-    logger.setLevel(log_level)
+    # Create and configure file handler
+    file_handler = logging.FileHandler('data_preparation.log', mode='w')
+    file_handler.setLevel(log_level)
+    file_handler.setFormatter(formatter)
     
-    # Suppress noisy pylidc warnings in non-debug mode
-    pylidc_logger = logging.getLogger('pylidc')
-    pylidc_logger.setLevel(logging.WARNING if debug else logging.ERROR)
-
-
+    # Add handlers to root logger
+    root_logger.addHandler(console_handler)
+    root_logger.addHandler(file_handler)
+    
+    # Suppress noisy third-party loggers
+    logging.getLogger('pylidc').setLevel(logging.WARNING)
+    logging.getLogger('PIL').setLevel(logging.WARNING)
+    logging.getLogger('matplotlib').setLevel(logging.WARNING)
+    
+    # Log confirmation
+    root_logger.info(f"Logging initialized at {'DEBUG' if debug else 'INFO'} level")
+    root_logger.debug("Debug logging is active - you should see this message")
 # Imports after logger setup
 from .config import DataPrepConfig
 from .pylidc_config import configure_pylidc, import_pylidc
@@ -94,10 +92,7 @@ def create_directory_structure(output_dir: str) -> Dict[str, Path]:
 
 
 def filter_scans_with_nodules(all_scans: List, pl) -> List[Tuple]:
-    """
-    Filter scans that have nodule annotations.
-    Returns list of (scan, annotations) tuples to avoid calling cluster_annotations twice.
-    """
+    """Filter scans with nodule annotations."""
     total = len(all_scans)
     logger.info(f"Filtering {total} scans for nodule annotations...")
     
@@ -144,7 +139,6 @@ def run_data_preparation(config: DataPrepConfig) -> Path:
     # Filter scans and keep annotations (avoids calling cluster_annotations twice)
     scans_with_annotations = filter_scans_with_nodules(all_scans, pl)
     
-    # Early exit check
     if len(scans_with_annotations) == 0:
         logger.error("No scans with nodule annotations found!")
         csv_path = directories['metadata'] / 'regression_dataset.csv'

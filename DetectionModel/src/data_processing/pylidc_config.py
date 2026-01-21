@@ -1,12 +1,4 @@
-"""
-PyLIDC Configuration Module
-============================
-Handles pylidc library configuration for custom DICOM paths.
-
-This module provides cross-platform compatible configuration
-for the pylidc library to work with custom LIDC-IDRI data locations.
-
-"""
+"""PyLIDC configuration utilities."""
 
 import os
 import logging
@@ -19,20 +11,7 @@ logger = logging.getLogger(__name__)
 
 
 def get_pylidc_config_path() -> Path:
-    """
-    Get the pylidc configuration file path for the current operating system.
-    
-    Returns
-    -------
-    Path
-        Path to the pylidc configuration file
-    
-    Notes
-    -----
-    Configuration file locations:
-        - Windows: C:\\Users\\<username>\\pylidc.conf
-        - macOS/Linux: /Users/<username>/.pylidcrc
-    """
+    """Get pylidc config file path for current OS."""
     system = platform.system()
     
     # PyLIDC uses different config file names per OS
@@ -48,27 +27,7 @@ def get_pylidc_config_path() -> Path:
 
 
 def normalize_dicom_path(dicom_path: str) -> str:
-    """
-    Normalize DICOM path for cross-platform compatibility.
-    
-    Parameters
-    ----------
-    dicom_path : str
-        User-provided path (may use Windows backslashes or Unix forward slashes)
-    
-    Returns
-    -------
-    str
-        Normalized absolute path
-    
-    Notes
-    -----
-    Handles:
-        - Windows paths: E:\\folder\\subfolder or E:/folder/subfolder
-        - Unix paths: /home/user/data
-        - Relative paths: ./data or ../data
-        - Paths with spaces
-    """
+    """Normalize DICOM path to absolute cross-platform format."""
     path_obj = Path(dicom_path)
     
     # Resolve to absolute path
@@ -84,27 +43,7 @@ def normalize_dicom_path(dicom_path: str) -> str:
 
 
 def validate_lidc_directory(dicom_path: str) -> Tuple[bool, str]:
-    """
-    Validate that the provided path appears to be a valid LIDC-IDRI directory.
-    
-    Parameters
-    ----------
-    dicom_path : str
-        Path to validate
-    
-    Returns
-    -------
-    Tuple[bool, str]
-        (is_valid, message) - validation result and descriptive message
-    
-    Notes
-    -----
-    Expected structure:
-        LIDC-IDRI/
-        ├── LIDC-IDRI-0001/
-        ├── LIDC-IDRI-0002/
-        └── ...
-    """
+    """Validate LIDC-IDRI directory structure."""
     path_obj = Path(dicom_path)
     
     # Check if path exists
@@ -139,35 +78,7 @@ def validate_lidc_directory(dicom_path: str) -> Tuple[bool, str]:
 
 
 def configure_pylidc(dicom_path: str) -> bool:
-    """
-    Dynamically configure pylidc to use a custom DICOM directory.
-    
-    Cross-platform compatible (Windows, macOS, Linux).
-    
-    Parameters
-    ----------
-    dicom_path : str
-        Path to the LIDC-IDRI DICOM data directory
-        Example Windows: E:\\FinalsProject\\Datasets\\...\\LIDC-IDRI
-        Example Unix: /data/LIDC-IDRI
-    
-    Returns
-    -------
-    bool
-        True if configuration was successful
-    
-    Notes
-    -----
-    The pylidc configuration file format:
-        [dicom]
-        path = /path/to/LIDC-IDRI
-    
-    PyLIDC searches for configuration in this order:
-        1. ~/.pylidcrc (home directory)
-        2. pylidc.conf (current working directory)
-    
-    On Windows, paths with backslashes are automatically handled.
-    """
+    """Configure pylidc with custom DICOM directory (cross-platform)."""
     # Normalize the path for the current OS
     normalized_path = normalize_dicom_path(dicom_path)
     
@@ -238,18 +149,6 @@ def configure_pylidc(dicom_path: str) -> bool:
 
 
 def import_pylidc():
-    """
-    Import pylidc after configuration.
-    
-    Returns
-    -------
-    module
-        The pylidc module
-    
-    Notes
-    -----
-    This should be called after configure_pylidc() to ensure
-    the library can find the DICOM data.
-    """
+    """Import pylidc module."""
     import pylidc as pl
     return pl

@@ -1,8 +1,4 @@
-"""
-Dataset Output Writer (CLEAN)
-==============================
-Handles writing dataset outputs.
-"""
+"""Dataset output writer."""
 
 import logging
 import json
