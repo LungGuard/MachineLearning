@@ -24,13 +24,9 @@ import configparser
 from pathlib import Path
 from typing import Tuple, List, Dict, Optional
 from dataclasses import dataclass
-from datetime import datetime
-import json
-import traceback
 import numpy as np
 import pandas as pd
 import cv2
-from sklearn.model_selection import train_test_split
 
 # Compatibility fixes for older libraries
 configparser.SafeConfigParser = configparser.ConfigParser
@@ -49,8 +45,6 @@ from .pylidc_config import configure_pylidc, import_pylidc
 # Import data splitting utilities
 from .data_splitter import split_patients_by_id, get_patient_split
 
-# Import atomic file I/O operations
-from .file_io import AtomicSaveResult, atomic_save_image_and_label
 
 # Import scan processing
 from .scan_processor import process_single_scan
@@ -63,16 +57,6 @@ from .dataset_writer import (
     log_summary_statistics
 )
 
-# Import local utilities
-from ..utils.dataset_utils import (
-    resample_volume,
-    apply_windowing,
-    create_25d_sandwich,
-    compute_nodule_bbox_yolo,
-    extract_nodule_features,
-    get_nodule_slice_indices,
-    get_nodule_centroid
-)
 
 # Configure logging
 logging.basicConfig(
@@ -202,8 +186,8 @@ def run_data_preparation(config: DataPrepConfig) -> Path:
         patient_id = scan.patient_id
         split = get_patient_split(patient_id, splits)
         
-        # Log progress every 10 scans
-        log_progress = (idx + 1) % 10 == 0 or idx == 0 or idx == total_scans - 1
+        # Log progress according to the config log freq
+        log_progress = (idx + 1) % config.log_freq == 0 or idx == 0 or idx == total_scans - 1
         logger.info(
             f"Processing scan {idx + 1}/{total_scans}: {patient_id} ({split})"
         ) if log_progress else None

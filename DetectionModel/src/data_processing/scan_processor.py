@@ -18,7 +18,7 @@ import traceback
 from pathlib import Path
 from typing import List, Dict
 import numpy as np
-
+from constants.detection.dataset_constants import RegModelConstants
 # Import dataset utilities
 import sys
 from pathlib import Path as PathLib
@@ -102,34 +102,44 @@ def process_single_scan(
         # Get clustered nodules (nodules agreed upon by multiple radiologists)
         nodules = scan.cluster_annotations()
         
-        logger.debug(f"Processing {patient_id}: {len(nodules)} nodule clusters")
+        logger.debug(f"Processing {patient_id} : {len(nodules)} nodule clusters")
         
-        # Process each nodule cluster
-        for nodule_idx, annotations in enumerate(nodules):
-            # Extract features from annotations
-            features = extract_nodule_features(annotations)
-            
-            # Filter by diameter
+        # Define filtering functions
+        def is_valid_nodule(nodule_data):
+            """Check if nodule meets size and annotation requirements."""
+            annotations, features = nodule_data
             diameter_valid = (
-                config.min_nodule_diameter <= features['diameter_mm'] <= config.max_nodule_diameter
+                config.min_nodule_diameter <= features[RegModelConstants.Features.FEATURE_DIAMETER_MM] <= config.max_nodule_diameter
             )
-            
-            # Skip invalid nodules without using continue
-            process_nodule = diameter_valid and features['annotation_count'] > 0
-            
+            annot_valid = features[RegModelConstants.Features.FEATURE_ANNOTATION_COUNT] > 0
+            return diameter_valid and annot_valid
+        
+        # Extract features for all nodules first
+        nodule_features = [
+            (annotations, extract_nodule_features(annotations)) 
+            for annotations in nodules
+        ]
+        
+        # Filter to only valid nodules
+        valid_nodules = list(filter(is_valid_nodule, nodule_features))
+        
+        logger.debug(f"Valid nodules after filtering: {len(valid_nodules)}/{len(nodules)}")
+        
+        # Process each valid nodule cluster
+        for nodule_idx, (annotations, features) in enumerate(valid_nodules):
             nodule_results = []
             
             # Get centroid for this nodule cluster
-            centroid = get_nodule_centroid(annotations, volume_shape) if process_nodule else None
+            centroid = get_nodule_centroid(annotations, volume_shape)
             
             # Get slice indices containing the nodule
-            slice_indices = get_nodule_slice_indices(annotations, volume_shape[0]) if process_nodule else []
+            slice_indices = get_nodule_slice_indices(annotations, volume_shape[0])
             
             # Select representative slices (center + neighbors)
             selected_slices = select_representative_slices(
                 slice_indices, 
                 config.slices_per_nodule
-            ) if slice_indices else []
+            )
             
             # Process each selected slice
             for slice_idx in selected_slices:
@@ -139,11 +149,11 @@ def process_single_scan(
                 # Compute YOLO bounding box
                 bbox = compute_nodule_bbox_yolo(
                     centroid,
-                    features['diameter_mm'],
+                    features[RegModelConstants.Features.FEATURE_DIAMETER_MM],
                     volume_shape,
                     config.target_spacing,
                     config.bbox_padding_factor
-                ) if centroid else None
+                )
                 
                 # Generate unique filename
                 filename = f"{patient_id}_n{nodule_idx:02d}_z{slice_idx:04d}"
@@ -162,45 +172,43 @@ def process_single_scan(
                     config.class_id,
                     image_path,
                     label_path
-                ) if bbox else AtomicSaveResult(success=False)
+                )
                 
                 # Create metadata row ONLY if save succeeded
-                metadata_entry = {
-                    'filename': filename,
-                    'patient_id': patient_id,
-                    'split_group': split,
-                    'nodule_index': nodule_idx,
-                    'slice_index': slice_idx,
-                    'diameter_mm': features['diameter_mm'],
-                    'malignancy_score': features['malignancy'],
-                    'spiculation': features['spiculation'],
-                    'lobulation': features['lobulation'],
-                    'subtlety': features['subtlety'],
-                    'sphericity': features['sphericity'],
-                    'margin': features['margin'],
-                    'texture': features['texture'],
-                    'calcification': features['calcification'],
-                    'internal_structure': features['internal_structure'],
-                    'annotation_count': features['annotation_count'],
-                    'centroid_z': centroid[0] if centroid else None,
-                    'centroid_y': centroid[1] if centroid else None,
-                    'centroid_x': centroid[2] if centroid else None,
-                    'bbox_x': bbox[0] if bbox else None,
-                    'bbox_y': bbox[1] if bbox else None,
-                    'bbox_w': bbox[2] if bbox else None,
-                    'bbox_h': bbox[3] if bbox else None,
-                    'image_path': save_result.image_path,
-                    'label_path': save_result.label_path,
-                    'volume_depth': volume_shape[0],
-                    'volume_height': volume_shape[1],
-                    'volume_width': volume_shape[2]
-                } if save_result.success else None
-                
-                # Append only successful entries
-                if metadata_entry:
+                if save_result.success:
+                    metadata_entry = {
+                        RegModelConstants.FILE_NAME : filename,
+                        RegModelConstants.PATIENT_ID : patient_id,
+                        RegModelConstants.SPLIT_GROUP : split,
+                        RegModelConstants.NOUDLE_INDEX : nodule_idx,
+                        RegModelConstants.SLICE_INDEX : slice_idx,
+                        RegModelConstants.Features.FEATURE_DIAMETER_MM : features[RegModelConstants.Features.FEATURE_DIAMETER_MM],
+                        f'{RegModelConstants.Features.FEATURE_MALIGNANCY}_score' : features[RegModelConstants.Features.FEATURE_MALIGNANCY],
+                        RegModelConstants.Features.FEATURE_SPICULATION : features[RegModelConstants.Features.FEATURE_SPICULATION],
+                        RegModelConstants.Features.FEATURE_LOBULATION : features[RegModelConstants.Features.FEATURE_LOBULATION],
+                        RegModelConstants.Features.FEATURE_SUBTLETY : features[RegModelConstants.Features.FEATURE_SUBTLETY],
+                        RegModelConstants.Features.FEATURE_SPHERICITY : features[RegModelConstants.Features.FEATURE_SPHERICITY],
+                        RegModelConstants.Features.FEATURE_MARGIN: features[RegModelConstants.Features.FEATURE_MARGIN],
+                        RegModelConstants.Features.FEATURE_TEXTURE : features[RegModelConstants.Features.FEATURE_TEXTURE],
+                        RegModelConstants.Features.FEATURE_CALCIFICATION : features[RegModelConstants.Features.FEATURE_CALCIFICATION],
+                        RegModelConstants.Features.FEATURE_INTERNAL_STRUCTURE : features[RegModelConstants.Features.FEATURE_INTERNAL_STRUCTURE],
+                        RegModelConstants.Features.FEATURE_ANNOTATION_COUNT : features[RegModelConstants.Features.FEATURE_ANNOTATION_COUNT],
+                        RegModelConstants.CENTROID.CENTROID_Z : centroid[0],
+                        RegModelConstants.CENTROID.CENTROID_Y : centroid[1],
+                        RegModelConstants.CENTROID.CENTROID_X : centroid[2],
+                        RegModelConstants.BBOX.BBOX_X : bbox[0],
+                        RegModelConstants.BBOX.BBOX_Y : bbox[1],
+                        RegModelConstants.BBOX.BBOX_W : bbox[2],
+                        RegModelConstants.BBOX.BBOX_H : bbox[3],
+                        RegModelConstants.IMAGE_PATH : save_result.image_path,
+                        RegModelConstants.LABEL_PATH : save_result.label_path,
+                        RegModelConstants.VOLUME.VOLUME_DEPTH : volume_shape[0],
+                        RegModelConstants.VOLUME.VOLUME_HEIGHT : volume_shape[1],
+                        RegModelConstants.VOLUME.VOLUME_WIDTH: volume_shape[2]
+                    }
                     nodule_results.append(metadata_entry)
             
-            metadata_rows.extend([r for r in nodule_results if r is not None])
+            metadata_rows.extend(nodule_results)
             
     except Exception as e:
         # Improved error logging to catch exactly where it fails

@@ -40,3 +40,4 @@ class DataPrepConfig:
     
     # Random seed for reproducibility
     random_seed: int = 42
+    log_freq:int = 5
