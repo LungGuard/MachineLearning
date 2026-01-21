@@ -1,19 +1,7 @@
 """
 LungGuard Data Preparation - Offline Data Generator
-====================================================
+================================================================
 Orchestrates data generation for YOLO detection and regression analysis.
-
-This script:
-1. Configures pylidc dynamically for custom DICOM paths
-2. Generates 2.5D images for YOLO training
-3. Creates aligned metadata CSV for regression
-4. Ensures atomic operations and strict data integrity
-
-Author: LungGuard ML Team
-License: Proprietary
-
-Usage:
-    python prepare_offline_data.py --data_path /path/to/LIDC-IDRI --output_dir /path/to/output
 """
 
 import os
@@ -22,11 +10,9 @@ import argparse
 import logging
 import configparser
 from pathlib import Path
-from typing import Tuple, List, Dict, Optional
-from dataclasses import dataclass
+from typing import Dict, List, Tuple
 import numpy as np
 import pandas as pd
-import cv2
 
 # Compatibility fixes for older libraries
 configparser.SafeConfigParser = configparser.ConfigParser
@@ -36,20 +22,48 @@ np.bool = np.bool_
 np.object = np.object_
 np.str = np.str_
 
-# Import configuration
+# Create logger
+logger = logging.getLogger(__name__)
+
+
+def setup_logging(debug: bool = False) -> None:
+    """Configure logging with appropriate level."""
+    log_level = logging.DEBUG if debug else logging.INFO
+    
+    # Clear existing handlers
+    root_logger = logging.getLogger()
+    root_logger.handlers.clear()
+    
+    # Simple format for cleaner output
+    log_format = (
+        '%(asctime)s - %(levelname)s - %(message)s'
+        if debug
+        else '%(asctime)s - %(message)s'
+    )
+    
+    logging.basicConfig(
+        level=log_level,
+        format=log_format,
+        datefmt='%H:%M:%S',
+        handlers=[
+            logging.StreamHandler(sys.stdout),
+            logging.FileHandler('data_preparation.log', mode='w')
+        ],
+        force=True
+    )
+    
+    logger.setLevel(log_level)
+    
+    # Suppress noisy pylidc warnings in non-debug mode
+    pylidc_logger = logging.getLogger('pylidc')
+    pylidc_logger.setLevel(logging.WARNING if debug else logging.ERROR)
+
+
+# Imports after logger setup
 from .config import DataPrepConfig
-
-# Import pylidc configuration utilities
 from .pylidc_config import configure_pylidc, import_pylidc
-
-# Import data splitting utilities
 from .data_splitter import split_patients_by_id, get_patient_split
-
-
-# Import scan processing
 from .scan_processor import process_single_scan
-
-# Import dataset writing utilities
 from .dataset_writer import (
     save_metadata_csv,
     save_config_json,
@@ -58,49 +72,8 @@ from .dataset_writer import (
 )
 
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(sys.stdout),
-        logging.FileHandler('data_preparation.log')
-    ]
-)
-logger = logging.getLogger(__name__)
-
-
-# ==============================================================================
-# Directory Structure Creation
-# ==============================================================================
-
 def create_directory_structure(output_dir: str) -> Dict[str, Path]:
-    """
-    Create the required directory structure for YOLO training.
-    
-    Structure:
-        output_dir/
-        ├── train/
-        │   ├── images/
-        │   └── labels/
-        ├── val/
-        │   ├── images/
-        │   └── labels/
-        ├── test/
-        │   ├── images/
-        │   └── labels/
-        └── metadata/
-    
-    Parameters
-    ----------
-    output_dir : str
-        Root output directory
-    
-    Returns
-    -------
-    Dict[str, Path]
-        Dictionary mapping split names to their paths
-    """
+    """Create YOLO directory structure."""
     base_path = Path(output_dir)
     
     directories = {
@@ -113,62 +86,76 @@ def create_directory_structure(output_dir: str) -> Dict[str, Path]:
         'metadata': base_path / 'metadata'
     }
     
-    # Create all directories
     for name, path in directories.items():
         path.mkdir(parents=True, exist_ok=True)
-        logger.debug(f"Created directory: {path}")
     
-    logger.info(f"Directory structure created at: {base_path}")
-    
+    logger.info(f"Output directory: {base_path}")
     return directories
 
 
-# ==============================================================================
-# Main Processing Pipeline
-# ==============================================================================
+def filter_scans_with_nodules(all_scans: List, pl) -> List[Tuple]:
+    """
+    Filter scans that have nodule annotations.
+    Returns list of (scan, annotations) tuples to avoid calling cluster_annotations twice.
+    """
+    total = len(all_scans)
+    logger.info(f"Filtering {total} scans for nodule annotations...")
+    
+    scans_with_nodules = []
+    
+    for idx, scan in enumerate(all_scans):
+        # Progress indicator every 100 scans
+        show_progress = (idx + 1) % 100 == 0 or idx == total - 1
+        print(f"\r  Checking scan {idx + 1}/{total}...", end='', flush=True) if show_progress else None
+        
+        try:
+            annotations = scan.cluster_annotations()
+            has_nodules = len(annotations) > 0
+            scans_with_nodules.append((scan, annotations)) if has_nodules else None
+        except Exception as e:
+            logger.debug(f"Error checking {scan.patient_id}: {e}")
+    
+    print()  # New line after progress
+    logger.info(f"Found {len(scans_with_nodules)} scans with nodules")
+    return scans_with_nodules
+
 
 def run_data_preparation(config: DataPrepConfig) -> Path:
-    """
-    Execute the full data preparation pipeline.
+    """Execute the data preparation pipeline."""
     
-    Parameters
-    ----------
-    config : DataPrepConfig
-        Pipeline configuration
-    
-    Returns
-    -------
-    Path
-        Path to the generated metadata CSV
-    """
-    logger.info("=" * 60)
+    logger.info("=" * 50)
     logger.info("LungGuard Data Preparation Pipeline")
-    logger.info("=" * 60)
+    logger.info("=" * 50)
     
     # Step 1: Configure pylidc
-    logger.info("Step 1: Configuring PyLIDC...")
+    logger.info("[1/6] Configuring PyLIDC...")
     configure_pylidc(config.data_path)
     pl = import_pylidc()
     
-    # Step 2: Create directory structure
-    logger.info("Step 2: Creating directory structure...")
+    # Step 2: Create directories
+    logger.info("[2/6] Creating directories...")
     directories = create_directory_structure(config.output_dir)
     
-    # Step 3: Query all scans with annotations
-    logger.info("Step 3: Querying LIDC database for annotated scans...")
+    # Step 3: Query and filter scans (OPTIMIZED - single pass)
+    logger.info("[3/6] Querying LIDC database...")
     all_scans = pl.query(pl.Scan).all()
+    logger.info(f"Total scans in database: {len(all_scans)}")
     
-    # Filter scans with nodule annotations
-    scans_with_nodules = [
-        scan for scan in all_scans
-        if len(scan.cluster_annotations()) > 0
-    ]
+    # Filter scans and keep annotations (avoids calling cluster_annotations twice)
+    scans_with_annotations = filter_scans_with_nodules(all_scans, pl)
     
-    logger.info(f"Found {len(scans_with_nodules)} scans with nodule annotations")
+    # Early exit check
+    if len(scans_with_annotations) == 0:
+        logger.error("No scans with nodule annotations found!")
+        csv_path = directories['metadata'] / 'regression_dataset.csv'
+        pd.DataFrame().to_csv(csv_path, index=False)
+        return csv_path
     
-    # Step 4: Get unique patient IDs and split
-    logger.info("Step 4: Splitting patients into train/val/test...")
-    patient_ids = list(set(scan.patient_id for scan in scans_with_nodules))
+    # Step 4: Split patients
+    logger.info("[4/6] Splitting patients...")
+    patient_ids = list(set(scan.patient_id for scan, _ in scans_with_annotations))
+    logger.info(f"Unique patients: {len(patient_ids)}")
+    
     splits = split_patients_by_id(
         patient_ids,
         config.train_ratio,
@@ -177,131 +164,82 @@ def run_data_preparation(config: DataPrepConfig) -> Path:
         config.random_seed
     )
     
-    # Step 5: Process all scans
-    logger.info("Step 5: Processing scans and generating data...")
+    # Step 5: Process scans
+    logger.info("[5/6] Processing scans...")
     all_metadata = []
+    successful = 0
+    failed = 0
+    total_scans = len(scans_with_annotations)
     
-    total_scans = len(scans_with_nodules)
-    for idx, scan in enumerate(scans_with_nodules):
+    for idx, (scan, annotations) in enumerate(scans_with_annotations):
         patient_id = scan.patient_id
         split = get_patient_split(patient_id, splits)
         
-        # Log progress according to the config log freq
-        log_progress = (idx + 1) % config.log_freq == 0 or idx == 0 or idx == total_scans - 1
-        logger.info(
-            f"Processing scan {idx + 1}/{total_scans}: {patient_id} ({split})"
-        ) if log_progress else None
+        # Progress display
+        show_progress = (idx + 1) % config.log_freq == 0 or idx == 0 or idx == total_scans - 1
+        logger.info(f"  [{idx + 1}/{total_scans}] {patient_id} ({split})") if show_progress else None
         
-        # Process scan and collect metadata
-        scan_metadata = process_single_scan(
-            scan, split, config, directories, pl
-        )
-        all_metadata.extend(scan_metadata)
+        try:
+            scan_metadata = process_single_scan(
+                scan, split, config, directories, pl
+            )
+            
+            samples_generated = len(scan_metadata)
+            all_metadata.extend(scan_metadata) if samples_generated > 0 else None
+            successful += 1 if samples_generated > 0 else 0
+            failed += 1 if samples_generated == 0 else 0
+            
+            logger.debug(f"    -> {samples_generated} samples") if samples_generated > 0 else None
+            
+        except Exception as e:
+            failed += 1
+            logger.error(f"  [{patient_id}] Error: {e}")
+            logger.debug(f"Traceback:", exc_info=True)
     
-    # Step 6: Create and save metadata CSV
-    logger.info("Step 6: Saving metadata CSV...")
+    logger.info(f"Processing complete: {successful} OK, {failed} failed")
+    logger.info(f"Total samples: {len(all_metadata)}")
+    
+    # Step 6: Save outputs
+    logger.info("[6/6] Saving outputs...")
     csv_path = directories['metadata'] / 'regression_dataset.csv'
     metadata_df = save_metadata_csv(all_metadata, csv_path)
     
-    # Save configuration for reproducibility
     config_path = directories['metadata'] / 'preparation_config.json'
     config_dict = save_config_json(config, config_path, metadata_df)
     
-    # Create YOLO dataset.yaml for training
     yaml_path = save_yolo_yaml(config.output_dir, metadata_df)
     
-    # Generate summary statistics
     log_summary_statistics(metadata_df, config_dict, csv_path, config_path, yaml_path)
     
     return csv_path
 
 
-# ==============================================================================
-# Entry Point
-# ==============================================================================
-
 def main():
-    """Main entry point with argument parsing."""
+    """Main entry point."""
     parser = argparse.ArgumentParser(
-        description='LungGuard Data Preparation Pipeline',
+        description='LungGuard Data Preparation',
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
     
-    parser.add_argument(
-        '--data_path',
-        type=str,
-        default='/data/LIDC-IDRI',
-        help='Path to LIDC-IDRI DICOM data'
-    )
-    
-    parser.add_argument(
-        '--output_dir',
-        type=str,
-        default='./lungguard_dataset',
-        help='Output directory for generated data'
-    )
-    
-    parser.add_argument(
-        '--train_ratio',
-        type=float,
-        default=0.70,
-        help='Training set ratio'
-    )
-    
-    parser.add_argument(
-        '--val_ratio',
-        type=float,
-        default=0.15,
-        help='Validation set ratio'
-    )
-    
-    parser.add_argument(
-        '--test_ratio',
-        type=float,
-        default=0.15,
-        help='Test set ratio'
-    )
-    
-    parser.add_argument(
-        '--min_diameter',
-        type=float,
-        default=3.0,
-        help='Minimum nodule diameter (mm)'
-    )
-    
-    parser.add_argument(
-        '--max_diameter',
-        type=float,
-        default=100.0,
-        help='Maximum nodule diameter (mm)'
-    )
-    
-    parser.add_argument(
-        '--slices_per_nodule',
-        type=int,
-        default=3,
-        help='Number of slices to generate per nodule'
-    )
-    
-    parser.add_argument(
-        '--seed',
-        type=int,
-        default=42,
-        help='Random seed for reproducibility'
-    )
-    
-    parser.add_argument(
-        '--debug',
-        action='store_true',
-        help='Enable debug logging'
-    )
+    parser.add_argument('--data_path', type=str, required=True, help='Path to LIDC-IDRI')
+    parser.add_argument('--output_dir', type=str, default='./lungguard_dataset', help='Output directory')
+    parser.add_argument('--train_ratio', type=float, default=0.70)
+    parser.add_argument('--val_ratio', type=float, default=0.15)
+    parser.add_argument('--test_ratio', type=float, default=0.15)
+    parser.add_argument('--min_diameter', type=float, default=3.0, help='Min nodule diameter (mm)')
+    parser.add_argument('--max_diameter', type=float, default=100.0, help='Max nodule diameter (mm)')
+    parser.add_argument('--slices_per_nodule', type=int, default=3)
+    parser.add_argument('--seed', type=int, default=42)
+    parser.add_argument('--debug', action='store_true', help='Enable debug logging')
+    parser.add_argument('--log_freq', type=int, default=10, help='Log every N scans')
     
     args = parser.parse_args()
     
-    # Set debug logging if requested
-    logger.setLevel(logging.DEBUG) if args.debug else None
+    # Setup logging FIRST
+    setup_logging(debug=args.debug)
     
-    # Create configuration
+    logger.debug(f"Arguments: {args}") if args.debug else None
+    
     config = DataPrepConfig(
         data_path=args.data_path,
         output_dir=args.output_dir,
@@ -311,17 +249,12 @@ def main():
         min_nodule_diameter=args.min_diameter,
         max_nodule_diameter=args.max_diameter,
         slices_per_nodule=args.slices_per_nodule,
-        random_seed=args.seed
+        random_seed=args.seed,
+        log_freq=args.log_freq
     )
     
-    # Run pipeline
     csv_path = run_data_preparation(config)
-    
     return csv_path
 
-
-# ==============================================================================
-# Script Execution
-# ==============================================================================
 
 result_path = main() if __name__ == "__main__" else None

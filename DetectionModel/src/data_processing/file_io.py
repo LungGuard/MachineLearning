@@ -6,8 +6,6 @@ Transactional file saving operations for image and label pairs.
 This module ensures that YOLO image and label files are saved atomically,
 maintaining strict 1:1 alignment between images and their annotations.
 
-Author: LungGuard ML Team
-License: Proprietary
 """
 
 import logging

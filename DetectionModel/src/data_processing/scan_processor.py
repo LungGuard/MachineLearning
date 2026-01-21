@@ -9,8 +9,6 @@ This module handles the complete processing pipeline for a single scan:
 - 2.5D image generation
 - Metadata extraction
 
-Author: LungGuard ML Team
-License: Proprietary
 """
 
 import logging
@@ -24,7 +22,7 @@ import sys
 from pathlib import Path as PathLib
 sys.path.insert(0, str(PathLib(__file__).parent.parent))
 
-from utils.dataset_utils import (
+from ..utils.dataset_utils import (
     resample_volume,
     apply_windowing,
     create_25d_sandwich,

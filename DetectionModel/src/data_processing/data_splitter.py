@@ -6,8 +6,6 @@ Patient-level data splitting to prevent data leakage.
 This module ensures that all data from a single patient stays in one split
 (train, validation, or test) to maintain proper evaluation integrity.
 
-Author: LungGuard ML Team
-License: Proprietary
 """
 
 import logging

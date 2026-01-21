@@ -3,8 +3,6 @@ Data Preparation Configuration
 ================================
 Configuration dataclass for the offline data preparation pipeline.
 
-Author: LungGuard ML Team
-License: Proprietary
 """
 
 from dataclasses import dataclass

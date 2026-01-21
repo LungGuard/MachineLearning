@@ -6,8 +6,6 @@ Handles pylidc library configuration for custom DICOM paths.
 This module provides cross-platform compatible configuration
 for the pylidc library to work with custom LIDC-IDRI data locations.
 
-Author: LungGuard ML Team
-License: Proprietary
 """
 
 import os

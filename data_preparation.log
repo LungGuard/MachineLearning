@@ -1,31 +1,131 @@
-2026-01-21 11:54:29,056 - INFO - Logging configured at DEBUG level
-2026-01-21 11:54:29,057 - DEBUG - Debug logging is enabled
-2026-01-21 11:54:29,057 - DEBUG - Arguments received: Namespace(data_path='E:\\FinalsProject\\Datasets\\CancerDetection\\images\\manifest-1600709154662\\LIDC-IDRI', output_dir='.\\DetectionModel\\datasets', train_ratio=0.7, val_ratio=0.15, test_ratio=0.15, min_diameter=3.0, max_diameter=100.0, slices_per_nodule=3, seed=42, debug=True)
-2026-01-21 11:54:29,057 - DEBUG - Configuration created: DataPrepConfig(data_path='E:\\FinalsProject\\Datasets\\CancerDetection\\images\\manifest-1600709154662\\LIDC-IDRI', output_dir='.\\DetectionModel\\datasets', train_ratio=0.7, val_ratio=0.15, test_ratio=0.15, target_spacing=(1.0, 1.0, 1.0), window_center=-600.0, window_width=1500.0, bbox_padding_factor=1.5, class_id=0, min_nodule_diameter=3.0, max_nodule_diameter=100.0, slices_per_nodule=3, random_seed=42)
-2026-01-21 11:54:29,058 - INFO - ============================================================
-2026-01-21 11:54:29,058 - INFO - LungGuard Data Preparation Pipeline
-2026-01-21 11:54:29,058 - INFO - ============================================================
-2026-01-21 11:54:29,058 - INFO - Step 1: Configuring PyLIDC...
-2026-01-21 11:54:29,059 - DEBUG - Path normalization: 'E:\FinalsProject\Datasets\CancerDetection\images\manifest-1600709154662\LIDC-IDRI' -> 'E:\FinalsProject\Datasets\CancerDetection\images\manifest-1600709154662\LIDC-IDRI'
-2026-01-21 11:54:29,063 - INFO - LIDC directory validation: Valid LIDC-IDRI directory with 1010 patient folders
-2026-01-21 11:54:29,064 - INFO - PyLIDC config written to: C:\Users\O\pylidc.conf
-2026-01-21 11:54:29,064 - INFO - PyLIDC configured successfully
+14:18:21 - ==================================================
+14:18:21 - LungGuard Data Preparation Pipeline
+14:18:21 - ==================================================
+14:18:21 - [1/6] Configuring PyLIDC...
+14:18:21 - LIDC directory validation: Valid LIDC-IDRI directory with 1010 patient folders
+14:18:21 - PyLIDC config written to: C:\Users\O\pylidc.conf
+14:18:21 - PyLIDC configured successfully
   Config file: C:\Users\O\pylidc.conf
   DICOM path: E:\FinalsProject\Datasets\CancerDetection\images\manifest-1600709154662\LIDC-IDRI
   Platform: Windows
-2026-01-21 11:54:34,071 - DEBUG - matplotlib data path: D:\FinalsProject\MachineLearning\.venv\Lib\site-packages\matplotlib\mpl-data
-2026-01-21 11:54:34,105 - DEBUG - CONFIGDIR=C:\Users\O\.matplotlib
-2026-01-21 11:54:34,108 - DEBUG - interactive is False
-2026-01-21 11:54:34,108 - DEBUG - platform is win32
-2026-01-21 11:54:34,206 - DEBUG - CACHEDIR=C:\Users\O\.matplotlib
-2026-01-21 11:54:34,216 - DEBUG - Using fontManager instance from C:\Users\O\.matplotlib\fontlist-v390.json
-2026-01-21 11:54:34,806 - INFO - Step 2: Creating directory structure...
-2026-01-21 11:54:34,807 - DEBUG - Created directory: DetectionModel\datasets\train\images
-2026-01-21 11:54:34,808 - DEBUG - Created directory: DetectionModel\datasets\train\labels
-2026-01-21 11:54:34,808 - DEBUG - Created directory: DetectionModel\datasets\val\images
-2026-01-21 11:54:34,809 - DEBUG - Created directory: DetectionModel\datasets\val\labels
-2026-01-21 11:54:34,809 - DEBUG - Created directory: DetectionModel\datasets\test\images
-2026-01-21 11:54:34,810 - DEBUG - Created directory: DetectionModel\datasets\test\labels
-2026-01-21 11:54:34,810 - DEBUG - Created directory: DetectionModel\datasets\metadata
-2026-01-21 11:54:34,810 - INFO - Directory structure created at: DetectionModel\datasets
-2026-01-21 11:54:34,811 - INFO - Step 3: Querying LIDC database for annotated scans...
+14:18:22 - [2/6] Creating directories...
+14:18:22 - Output directory: DetectionModel\datasets
+14:18:22 - [3/6] Querying LIDC database...
+14:18:22 - Total scans in database: 1018
+14:18:22 - Filtering 1018 scans for nodule annotations...
+14:26:50 - Found 883 scans with nodules
+14:26:50 - [4/6] Splitting patients...
+14:26:50 - Unique patients: 875
+14:26:50 - Patient split - Train: 612, Val: 131, Test: 132
+14:26:50 - [5/6] Processing scans...
+14:26:50 -   [1/883] LIDC-IDRI-0078 (train)
+14:27:44 -   [10/883] LIDC-IDRI-0151 (val)
+14:29:01 -   [20/883] LIDC-IDRI-0009 (train)
+14:30:20 -   [30/883] LIDC-IDRI-0019 (train)
+14:31:55 -   [40/883] LIDC-IDRI-0030 (train)
+14:33:00 -   [50/883] LIDC-IDRI-0041 (train)
+14:34:13 -   [60/883] LIDC-IDRI-0051 (train)
+14:35:39 -   [70/883] LIDC-IDRI-0061 (train)
+14:37:29 -   [80/883] LIDC-IDRI-0074 (train)
+14:38:56 -   [90/883] LIDC-IDRI-0086 (train)
+14:40:16 -   [100/883] LIDC-IDRI-0096 (train)
+14:41:17 -   [110/883] LIDC-IDRI-0108 (val)
+14:42:31 -   [120/883] LIDC-IDRI-0120 (train)
+14:44:01 -   [130/883] LIDC-IDRI-0131 (train)
+14:45:33 -   [140/883] LIDC-IDRI-0142 (train)
+14:46:41 -   [150/883] LIDC-IDRI-0155 (test)
+14:48:02 -   [160/883] LIDC-IDRI-0165 (val)
+14:49:15 -   [170/883] LIDC-IDRI-0176 (train)
+14:50:16 -   [180/883] LIDC-IDRI-0186 (train)
+14:51:22 -   [190/883] LIDC-IDRI-0198 (train)
+14:52:30 -   [200/883] LIDC-IDRI-0209 (test)
+14:53:37 -   [210/883] LIDC-IDRI-0221 (train)
+14:54:43 -   [220/883] LIDC-IDRI-0234 (train)
+14:55:52 -   [230/883] LIDC-IDRI-0246 (test)
+14:56:58 -   [240/883] LIDC-IDRI-0257 (train)
+14:58:06 -   [250/883] LIDC-IDRI-0268 (train)
+14:59:04 -   [260/883] LIDC-IDRI-0278 (train)
+15:00:07 -   [270/883] LIDC-IDRI-0289 (train)
+15:01:46 -   [280/883] LIDC-IDRI-0301 (train)
+15:03:16 -   [290/883] LIDC-IDRI-0313 (val)
+15:04:25 -   [300/883] LIDC-IDRI-0324 (test)
+15:05:44 -   [310/883] LIDC-IDRI-0338 (val)
+15:07:14 -   [320/883] LIDC-IDRI-0350 (test)
+15:08:23 -   [330/883] LIDC-IDRI-0359 (train)
+15:09:33 -   [340/883] LIDC-IDRI-0370 (val)
+15:11:14 -   [350/883] LIDC-IDRI-0380 (train)
+15:12:37 -   [360/883] LIDC-IDRI-0394 (train)
+15:14:02 -   [370/883] LIDC-IDRI-0405 (val)
+15:15:25 -   [380/883] LIDC-IDRI-0416 (train)
+15:16:52 -   [390/883] LIDC-IDRI-0431 (test)
+15:18:41 -   [400/883] LIDC-IDRI-0442 (val)
+15:20:03 -   [410/883] LIDC-IDRI-0452 (val)
+15:21:37 -   [420/883] LIDC-IDRI-0463 (train)
+15:23:11 -   [430/883] LIDC-IDRI-0475 (train)
+15:24:33 -   [440/883] LIDC-IDRI-0485 (train)
+15:25:35 - Error processing scan LIDC-IDRI-0490: The number of bytes of pixel data is less than expected (2358 vs 524288 bytes) - the dataset may be corrupted, have an invalid group 0028 element value, or the transfer syntax may be incorrect
+15:26:15 -   [450/883] LIDC-IDRI-0495 (train)
+15:27:27 -   [460/883] LIDC-IDRI-0505 (train)
+15:28:46 -   [470/883] LIDC-IDRI-0521 (train)
+15:30:14 -   [480/883] LIDC-IDRI-0533 (test)
+15:31:59 -   [490/883] LIDC-IDRI-0546 (train)
+15:33:21 -   [500/883] LIDC-IDRI-0557 (test)
+15:34:39 -   [510/883] LIDC-IDRI-0569 (train)
+15:35:50 -   [520/883] LIDC-IDRI-0580 (train)
+15:37:14 -   [530/883] LIDC-IDRI-0592 (train)
+15:38:25 -   [540/883] LIDC-IDRI-0604 (train)
+15:40:02 -   [550/883] LIDC-IDRI-0615 (train)
+15:41:37 -   [560/883] LIDC-IDRI-0629 (train)
+15:43:03 -   [570/883] LIDC-IDRI-1010 (test)
+15:44:28 -   [580/883] LIDC-IDRI-1000 (train)
+15:45:55 -   [590/883] LIDC-IDRI-0987 (train)
+15:47:21 -   [600/883] LIDC-IDRI-0976 (train)
+15:48:38 -   [610/883] LIDC-IDRI-0962 (test)
+15:50:01 -   [620/883] LIDC-IDRI-0949 (train)
+15:51:42 -   [630/883] LIDC-IDRI-0938 (train)
+15:52:55 -   [640/883] LIDC-IDRI-0923 (train)
+15:54:30 -   [650/883] LIDC-IDRI-0912 (train)
+15:56:02 -   [660/883] LIDC-IDRI-0899 (train)
+15:57:14 -   [670/883] LIDC-IDRI-0884 (train)
+15:58:40 -   [680/883] LIDC-IDRI-0870 (train)
+16:00:09 -   [690/883] LIDC-IDRI-0859 (train)
+16:01:51 -   [700/883] LIDC-IDRI-0848 (train)
+16:03:19 -   [710/883] LIDC-IDRI-0837 (train)
+16:04:44 -   [720/883] LIDC-IDRI-0827 (train)
+16:06:10 -   [730/883] LIDC-IDRI-0817 (train)
+16:07:33 -   [740/883] LIDC-IDRI-0806 (train)
+16:08:56 -   [750/883] LIDC-IDRI-0795 (val)
+16:10:26 -   [760/883] LIDC-IDRI-0785 (train)
+16:12:02 -   [770/883] LIDC-IDRI-0773 (train)
+16:13:19 -   [780/883] LIDC-IDRI-0762 (test)
+16:15:09 -   [790/883] LIDC-IDRI-0750 (val)
+16:16:55 -   [800/883] LIDC-IDRI-0736 (train)
+16:18:52 -   [810/883] LIDC-IDRI-0725 (train)
+16:20:13 -   [820/883] LIDC-IDRI-0713 (train)
+16:21:38 -   [830/883] LIDC-IDRI-0701 (train)
+16:23:15 -   [840/883] LIDC-IDRI-0688 (val)
+16:24:51 -   [850/883] LIDC-IDRI-0675 (train)
+16:26:38 -   [860/883] LIDC-IDRI-0662 (train)
+16:28:06 -   [870/883] LIDC-IDRI-0651 (train)
+16:29:47 -   [880/883] LIDC-IDRI-0640 (train)
+16:30:09 -   [883/883] LIDC-IDRI-0127 (train)
+16:30:14 - Processing complete: 0 OK, 883 failed
+16:30:14 - Total samples: 0
+16:30:14 - [6/6] Saving outputs...
+16:30:14 - No samples generated - CSV will be empty
+16:30:14 - Saved: DetectionModel\datasets\metadata\regression_dataset.csv (0 rows)
+16:30:14 - Saved: DetectionModel\datasets\metadata\preparation_config.json
+16:30:14 - Saved: DetectionModel\datasets\dataset.yaml
+16:30:14 - ==================================================
+16:30:14 - COMPLETE
+16:30:14 - ==================================================
+16:30:14 - Total samples: 0
+16:30:14 -   Train: 0
+16:30:14 -   Val:   0
+16:30:14 -   Test:  0
+16:30:14 - Files: regression_dataset.csv, preparation_config.json, dataset.yaml
+16:30:14 - 
+No samples generated! Check:
+  - DICOM path is correct
+  - Nodule diameter filters
+  - Run with --debug for details
