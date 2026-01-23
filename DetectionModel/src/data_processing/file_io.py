@@ -19,28 +19,31 @@ class AtomicSaveResult:
     error_message: Optional[str] = None
 
 
-def atomic_save_image_and_label(
-    image: np.ndarray,
-    yolo_bbox: Tuple[float, float, float, float],
-    class_id: int,
-    image_path: Path,
-    label_path: Path
-) -> AtomicSaveResult:
-    """Save image and label atomically (label only if image succeeds)."""
-    result = AtomicSaveResult(success=False)
-    
-    # Attempt image save
+def save_image(image: np.ndarray, image_path: Path) -> bool:
+    """
+    Save image to disk.
+    Returns Saving result
+    """
     try:
         # Convert RGB to BGR for OpenCV
         image_bgr = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
         save_success = cv2.imwrite(str(image_path), image_bgr)
         
-        image_saved = save_success and image_path.exists()
+        return save_success and image_path.exists()
     except Exception as e:
         logger.error(f"Image save failed: {e}")
-        image_saved = False
-    
-    # Save label ONLY if image save succeeded
+        return False
+
+
+def save_label(
+    class_id: int,
+    yolo_bbox: Tuple[float, float, float, float],
+    label_path: Path
+) -> bool:
+    """
+    Save YOLO format label to disk.
+    Returns Saving result
+    """
     try:
         label_content = (
             f"{class_id} "
@@ -50,28 +53,62 @@ def atomic_save_image_and_label(
             f"{yolo_bbox[3]:.6f}\n"
         )
         
-        # Write label file only if image was saved
-        write_label = image_saved
+        with open(label_path, 'w') as f:
+            f.write(label_content)
         
-        label_saved = False
-        if write_label:
-            with open(label_path, 'w') as f:
-                f.write(label_content)
-            label_saved = True
-            
+        return label_path.exists()
     except Exception as e:
         logger.error(f"Label save failed: {e}")
-        label_saved = False
-        # Rollback: delete image if label failed
-        if image_saved and image_path.exists():
-            image_path.unlink()
-        image_saved = False
+        return False
+
+
+def atomic_save_image_and_label(
+    image: np.ndarray,
+    yolo_bbox: Tuple[float, float, float, float],
+    class_id: int,
+    image_path: Path,
+    label_path: Path
+) -> AtomicSaveResult:
+    """
+    Save image and label atomically (label only if image succeeds).
+    If label save fails, the image is rolled back (deleted).
     
-    result = AtomicSaveResult(
-        success=image_saved and label_saved,
-        image_path=str(image_path) if image_saved else None,
-        label_path=str(label_path) if label_saved else None,
-        error_message=None if (image_saved and label_saved) else "Save operation failed"
+    Args:
+        image: Image array in RGB format
+        yolo_bbox: YOLO format bounding box (x_center, y_center, width, height)
+        class_id: Class ID for YOLO format
+        image_path: Path where to save the image
+        label_path: Path where to save the label
+        
+    Returns:
+        AtomicSaveResult with success status and file paths
+    """
+    image_saved = save_image(image, image_path)
+    
+    if not image_saved:
+        return AtomicSaveResult(
+            success=False,
+            error_message="Image save failed"
+        )
+    
+    label_saved = save_label(class_id, yolo_bbox, label_path)
+    
+    if not label_saved:
+        if image_path.exists():
+            try:
+                image_path.unlink()
+                logger.debug(f"Rolled back image deletion: {image_path}")
+            except Exception as e:
+                logger.error(f"Failed to rollback image: {e}")
+        
+        return AtomicSaveResult(
+            success=False,
+            error_message="Label save failed - image rolled back"
+        )
+    
+    return AtomicSaveResult(
+        success=True,
+        image_path=str(image_path),
+        label_path=str(label_path),
+        error_message=None
     )
-    
-    return result

@@ -27,10 +27,8 @@ def save_metadata_csv(metadata_rows: List[Dict], output_path: Path) -> Optional[
     
     metadata_df = pd.DataFrame(metadata_rows)
     
-    # Log columns for debugging
     logger.debug(f"Columns: {list(metadata_df.columns)}") if row_count > 0 else None
     
-    # Warn if empty
     logger.warning("No samples generated - CSV will be empty") if row_count == 0 else None
     
     metadata_df.to_csv(output_path, index=False)
@@ -119,7 +117,6 @@ def log_summary_statistics(
     logger.info(f"  Test:  {config_dict.get('test_samples', 0)}")
     logger.info(f"Files: {csv_path.name}, {config_path.name}, {yaml_path.name}")
     
-    # Warning for empty dataset
     logger.warning(
         "\nNo samples generated! Check:\n"
         "  - DICOM path is correct\n"

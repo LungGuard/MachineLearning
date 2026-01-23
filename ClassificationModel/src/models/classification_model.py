@@ -106,25 +106,8 @@ class CancerClassificationModel(BaseCNNModel):
             for cancer_type, confidence in zip(predicted_class_names, confidences)
         ]
     
-    def evaluate_model(self, present_metrics=False, send_message=False, save_confusion_matrix=True):
-        """Specific evaluation logic for classification."""
-        test_dataset = self.dataset[DatasetConstants.TEST_SPLIT_NAME]
-        results = self.model.evaluate(test_dataset, return_dict=True, verbose=1)
-        
-        if present_metrics:
-            for metric, value in results.items():
-                print(f'{metric.upper()}: {value:.3f}')
-        
-        if save_confusion_matrix:
-            self._save_confusion_matrix(test_dataset)
-        
-        if send_message:
-            metrics_msg = NtfyNotificationService.format_metrics_msg(results)
-            self.notifier.send_evaluation_results(metrics_msg)
-
-        return results
     
-    def _save_confusion_matrix(self, test_dataset):
+    def save_confusion_matrix(self, test_dataset):
         """Generate and save confusion matrix visualization."""
         # Collect true labels and predictions
         y_true = []

@@ -2,7 +2,6 @@
 
 import os
 import sys
-import argparse
 import logging
 import configparser
 from pathlib import Path
@@ -10,15 +9,23 @@ from typing import Dict, List, Tuple
 import numpy as np
 import pandas as pd
 
-# Compatibility fixes
-configparser.SafeConfigParser = configparser.ConfigParser
-np.int = np.int64
-np.float = np.float64
-np.bool = np.bool_
-np.object = np.object_
-np.str = np.str_
 
 logger = logging.getLogger(__name__)
+
+
+DEFAULT_CONFIG = {
+    'data_path': '/path/to/LIDC-IDRI',  # TODO: Set your LIDC-IDRI path
+    'output_dir': './lungguard_dataset',
+    'train_ratio': 0.70,
+    'val_ratio': 0.15,
+    'test_ratio': 0.15,
+    'min_diameter': 3.0,
+    'max_diameter': 100.0,
+    'slices_per_nodule': 3,
+    'seed': 42,
+    'debug': False,
+    'log_freq': 5
+}
 
 
 def setup_logging(debug: bool = False) -> None:
@@ -35,33 +42,29 @@ def setup_logging(debug: bool = False) -> None:
     )
     formatter = logging.Formatter(log_format, datefmt='%H:%M:%S')
     
-    # Create and configure console handler
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setLevel(log_level)
     console_handler.setFormatter(formatter)
     
-    # Create and configure file handler
     file_handler = logging.FileHandler('data_preparation.log', mode='w')
     file_handler.setLevel(log_level)
     file_handler.setFormatter(formatter)
     
-    # Add handlers to root logger
     root_logger.addHandler(console_handler)
     root_logger.addHandler(file_handler)
     
-    # Suppress noisy third-party loggers
     logging.getLogger('pylidc').setLevel(logging.WARNING)
     logging.getLogger('PIL').setLevel(logging.WARNING)
     logging.getLogger('matplotlib').setLevel(logging.WARNING)
     
-    # Log confirmation
+    
     root_logger.info(f"Logging initialized at {'DEBUG' if debug else 'INFO'} level")
     root_logger.debug("Debug logging is active - you should see this message")
-# Imports after logger setup
+
 from .config import DataPrepConfig
 from .pylidc_config import configure_pylidc, import_pylidc
 from .data_splitter import split_patients_by_id, get_patient_split
-from .scan_processor import process_single_scan
+from .scan_processor import CTScanProcessor
 from .dataset_writer import (
     save_metadata_csv,
     save_config_json,
@@ -160,6 +163,10 @@ def run_data_preparation(config: DataPrepConfig) -> Path:
     
     # Step 5: Process scans
     logger.info("[5/6] Processing scans...")
+    
+    # Create processor instance once (reuse for all scans)
+    processor = CTScanProcessor(config, directories)
+    
     all_metadata = []
     successful = 0
     failed = 0
@@ -174,9 +181,7 @@ def run_data_preparation(config: DataPrepConfig) -> Path:
         logger.info(f"  [{idx + 1}/{total_scans}] {patient_id} ({split})") if show_progress else None
         
         try:
-            scan_metadata = process_single_scan(
-                scan, split, config, directories, pl
-            )
+            scan_metadata = processor.process_scan(scan, split, pl)
             
             samples_generated = len(scan_metadata)
             all_metadata.extend(scan_metadata) if samples_generated > 0 else None
@@ -208,47 +213,43 @@ def run_data_preparation(config: DataPrepConfig) -> Path:
     return csv_path
 
 
-def main():
-    """Main entry point."""
-    parser = argparse.ArgumentParser(
-        description='LungGuard Data Preparation',
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter
-    )
+def main(config_overrides: Dict = None):
+    """
+    Main entry point.
+    """
+    config_values = DEFAULT_CONFIG.copy()
+    if config_overrides:
+        config_values.update(config_overrides)
     
-    parser.add_argument('--data_path', type=str, required=True, help='Path to LIDC-IDRI')
-    parser.add_argument('--output_dir', type=str, default='./lungguard_dataset', help='Output directory')
-    parser.add_argument('--train_ratio', type=float, default=0.70)
-    parser.add_argument('--val_ratio', type=float, default=0.15)
-    parser.add_argument('--test_ratio', type=float, default=0.15)
-    parser.add_argument('--min_diameter', type=float, default=3.0, help='Min nodule diameter (mm)')
-    parser.add_argument('--max_diameter', type=float, default=100.0, help='Max nodule diameter (mm)')
-    parser.add_argument('--slices_per_nodule', type=int, default=3)
-    parser.add_argument('--seed', type=int, default=42)
-    parser.add_argument('--debug', action='store_true', help='Enable debug logging')
-    parser.add_argument('--log_freq', type=int, default=10, help='Log every N scans')
+    setup_logging(debug=config_values['debug'])
     
-    args = parser.parse_args()
-    
-    # Setup logging FIRST
-    setup_logging(debug=args.debug)
-    
-    logger.debug(f"Arguments: {args}") if args.debug else None
+    logger.debug(f"Configuration: {config_values}") if config_values['debug'] else None
     
     config = DataPrepConfig(
-        data_path=args.data_path,
-        output_dir=args.output_dir,
-        train_ratio=args.train_ratio,
-        val_ratio=args.val_ratio,
-        test_ratio=args.test_ratio,
-        min_nodule_diameter=args.min_diameter,
-        max_nodule_diameter=args.max_diameter,
-        slices_per_nodule=args.slices_per_nodule,
-        random_seed=args.seed,
-        log_freq=args.log_freq
+        data_path=config_values['data_path'],
+        output_dir=config_values['output_dir'],
+        train_ratio=config_values['train_ratio'],
+        val_ratio=config_values['val_ratio'],
+        test_ratio=config_values['test_ratio'],
+        min_nodule_diameter=config_values['min_diameter'],
+        max_nodule_diameter=config_values['max_diameter'],
+        slices_per_nodule=config_values['slices_per_nodule'],
+        random_seed=config_values['seed'],
+        log_freq=config_values['log_freq']
     )
     
     csv_path = run_data_preparation(config)
     return csv_path
 
 
-result_path = main() if __name__ == "__main__" else None
+if __name__ == "__main__":
+
+    
+    config_overrides = {
+        'data_path': '/path/to/LIDC-IDRI',  # REQUIRED: Set your LIDC-IDRI path
+        # 'output_dir': './my_custom_output',  # Uncomment to change output directory
+        # 'min_diameter': 5.0,  # Uncomment to change minimum nodule diameter
+        # 'debug': True,  # Uncomment for debug logging
+    }
+    
+    result_path = main(config_overrides)

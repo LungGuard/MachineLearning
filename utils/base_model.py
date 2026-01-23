@@ -3,13 +3,12 @@ from pathlib import Path
 import logging
 from utils.notification_service import NtfyNotificationService
 
-# Logger setup
 logger = logging.getLogger(__name__)
 
 class BaseModel(ABC):
     """
     Abstract base class for all models in the system.
-    Handles common administrative tasks like notifications and basic interface definition.
+    Handles common tasks like notifications and basic interface definition.
     """
     def __init__(self, model_name):
         self.model_name = model_name
@@ -28,7 +27,7 @@ class BaseModel(ABC):
 
     @abstractmethod
     def predict(self, input_data):
-        """Performs inference."""
+        """Performs prediction process."""
         pass
     
     @abstractmethod

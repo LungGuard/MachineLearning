@@ -8,7 +8,6 @@ class RegModelConstants:
     SLICE_INDEX = 'slice_index'
     IMAGE_PATH = 'image_path'
     LABEL_PATH = 'label_path'
-
     class Features:
         FEATURE_DIAMETER_MM = 'diameter_mm'
         FEATURE_MALIGNANCY = 'malignancy'
@@ -21,10 +20,22 @@ class RegModelConstants:
         FEATURE_CALCIFICATION = 'calcification'
         FEATURE_ANNOTATION_COUNT = 'annotation_count'
         FEATURE_INTERNAL_STRUCTURE = 'internal_structure'
+        DEFAULT_FEATURES = {
+            FEATURE_MALIGNANCY : 3.0,  # Indeterminate
+            FEATURE_SPICULATION : 1.0,
+            FEATURE_LOBULATION : 1.0,
+            FEATURE_SUBTLETY : 3.0,
+            FEATURE_SPHERICITY : 3.0,
+            FEATURE_MARGIN : 3.0,
+            FEATURE_TEXTURE : 3.0,
+            FEATURE_CALCIFICATION : 1.0,
+            FEATURE_INTERNAL_STRUCTURE : 1.0,
+        }
     class CENTROID:
         CENTROID_X = 'centroid_x'
         CENTROID_Y = 'centroid_Y'
         CENTROID_Z = 'centroid_Z'
+        CENTROID_DIM = 3
     class BBOX:
         BBOX_X = 'bbox_x'
         BBOX_Y = 'bbox_y'
