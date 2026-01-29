@@ -3,7 +3,6 @@
 import os
 import sys
 import logging
-import configparser
 from pathlib import Path
 from typing import Dict, List, Tuple
 import numpy as np
@@ -125,21 +124,17 @@ def run_data_preparation(config: DataPrepConfig) -> Path:
     logger.info("LungGuard Data Preparation Pipeline")
     logger.info("=" * 50)
     
-    # Step 1: Configure pylidc
     logger.info("[1/6] Configuring PyLIDC...")
     configure_pylidc(config.data_path)
     pl = import_pylidc()
     
-    # Step 2: Create directories
     logger.info("[2/6] Creating directories...")
     directories = create_directory_structure(config.output_dir)
     
-    # Step 3: Query and filter scans (OPTIMIZED - single pass)
     logger.info("[3/6] Querying LIDC database...")
     all_scans = pl.query(pl.Scan).all()
     logger.info(f"Total scans in database: {len(all_scans)}")
     
-    # Filter scans and keep annotations (avoids calling cluster_annotations twice)
     scans_with_annotations = filter_scans_with_nodules(all_scans, pl)
     
     if len(scans_with_annotations) == 0:
@@ -148,7 +143,6 @@ def run_data_preparation(config: DataPrepConfig) -> Path:
         pd.DataFrame().to_csv(csv_path, index=False)
         return csv_path
     
-    # Step 4: Split patients
     logger.info("[4/6] Splitting patients...")
     patient_ids = list(set(scan.patient_id for scan, _ in scans_with_annotations))
     logger.info(f"Unique patients: {len(patient_ids)}")
@@ -161,10 +155,8 @@ def run_data_preparation(config: DataPrepConfig) -> Path:
         config.random_seed
     )
     
-    # Step 5: Process scans
     logger.info("[5/6] Processing scans...")
     
-    # Create processor instance once (reuse for all scans)
     processor = CTScanProcessor(config, directories)
     
     all_metadata = []

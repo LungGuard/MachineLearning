@@ -1,5 +1,10 @@
+from pathlib import Path
+
 
 class RegModelConstants:
+    
+
+    DATASET_METADATA_PATH = Path(__file__).parent.parent.parent / "DetectionModel" / "datasets" / "metadata" / "regression_dataset.csv"
     
     FILE_NAME = 'filename'
     PATIENT_ID = 'patient_id'
@@ -8,6 +13,11 @@ class RegModelConstants:
     SLICE_INDEX = 'slice_index'
     IMAGE_PATH = 'image_path'
     LABEL_PATH = 'label_path'
+
+    TRAIN_SPLIT="train"
+    TEST_SPLIT="test"
+    VAL_SPLIT = "val"
+    
     class Features:
         FEATURE_DIAMETER_MM = 'diameter_mm'
         FEATURE_MALIGNANCY = 'malignancy'
