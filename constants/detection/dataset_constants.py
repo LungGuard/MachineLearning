@@ -17,6 +17,9 @@ class RegModelConstants:
     TRAIN_SPLIT="train"
     TEST_SPLIT="test"
     VAL_SPLIT = "val"
+
+    DATASET_X_FEATURES= "x_features"
+    DATASET_Y_FEATURES= "y_features"
     
     class Features:
         FEATURE_DIAMETER_MM = 'diameter_mm'
