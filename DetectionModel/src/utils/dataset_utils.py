@@ -30,7 +30,7 @@ def load_reg_dataset(reg_dataset_path=RegModelConstants.DATASET_METADATA_PATH):
     
     reg_df.drop(columns=columns_to_drop,inplace=True)
 
-    dataset={}
+    dataset = {}
 
     for split in split_groups:
 

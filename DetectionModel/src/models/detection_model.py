@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import logging
-from constants.detection.model_constants import DetectionModelConstants
+from constants.detection.model_constants import DetectionModelConstants as ModelConstants
 from utils.notification_service import NtfyNotificationService
 from datetime import datetime
 from utils.base_cnn_model import BaseCNNModel
@@ -13,10 +13,11 @@ from tensorflow.keras import layers, models
 
 logger = logging.getLogger(__name__)
 class NodulesDetectionModel(BaseCNNModel):
-    def __init__(self, checkpoint_path=None, input_shape=(640, 640, 3)):
-        super().__init__(input_shape=input_shape, model_name=DetectionModelConstants.MODEL_NAME)
+    def __init__(self, checkpoint_path=None, input_shape=ModelConstants.DEFAULT_INPUT_SHAPE):
         
-        self.num_classes = 1
+        super().__init__(input_shape=input_shape, model_name=ModelConstants.MODEL_NAME)
+        
+        self.num_classes = ModelConstants.NUM_CLASSES
         
         try:
             if checkpoint_path:
@@ -32,7 +33,7 @@ class NodulesDetectionModel(BaseCNNModel):
             a method to build a Keras Native YOLO Model, in order to allow the addition of extra layers 
         """        
         backbone = kcv.models.YOLOV8Backbone.from_preset(
-            "yolo_v8_m_backbone_coco"  # 'n', 's', 'm', 'l', 'x' variants available
+            ModelConstants.YOLOV8_BACKBONE_PRESET
         )
         
 
@@ -43,7 +44,7 @@ class NodulesDetectionModel(BaseCNNModel):
         self.model = kcv.models.YOLOV8Detector(
             backbone=backbone,
             num_classes=self.num_classes,
-            bounding_box_format="xywh", # Or 'xyxy', 'rel_yxyx' etc.
+            bounding_box_format=ModelConstants.BOUNDING_BOX_FORMAT,
             # fpn_depth=2  # You can customize the Feature Pyramid Network depth here
         )
         
@@ -59,20 +60,15 @@ class NodulesDetectionModel(BaseCNNModel):
         # output = layers.Dense(1, activation='sigmoid')(x)
         # self.model = models.Model(inputs=inputs, outputs=output)
 
-        # Compile with specific YOLO losses
-        # Note: YOLO requires a complex box loss + classification loss combo.
-        # KerasCV handles this internally if you use their Detector class.
         self.model.compile(
-            optimizer=tf.keras.optimizers.Adam(learning_rate=1e-3),
-            classification_loss='binary_crossentropy',
-            box_loss='ciou' 
+            optimizer=tf.keras.optimizers.Adam(learning_rate=ModelConstants.DEFAULT_LEARNING_RATE),
+            classification_loss=ModelConstants.CLASSIFICATION_LOSS,
+            box_loss=ModelConstants.BOX_LOSS 
         )
-    def train_model(self, train_data, val_data=None, epochs=100, callbacks=None):
+    def train_model(self, train_data, val_data=None, epochs=ModelConstants.EPOCHES, callbacks=None):
         # Note: train_data must be a tf.data.Dataset dictionary with keys 
         # 'images' and 'bounding_boxes' formatted for KerasCV.
-        
-        print("Starting training with KerasCV YOLO...")
-        return self.model.fit(
+        history = self.model.fit(
             train_data,
             validation_data=val_data,
             epochs=epochs,
