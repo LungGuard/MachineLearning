@@ -72,13 +72,12 @@ class VolumePreprocessor:
         
         windowed = np.clip(volume, window_lower_bound, window_upper_bound)
         
-        normalized = (
-            (windowed - window_lower_bound) / width 
-            if normalize 
-            else windowed
-        )
+        if normalize:
+            windowed = (windowed - window_lower_bound) / width
+                    
+            windowed = np.clip(windowed, 0.0, 1.0)
         
-        return normalized.astype(np.float32)
+        return windowed.astype(np.float32)
     
     @staticmethod
     def create_25d_sandwich(
