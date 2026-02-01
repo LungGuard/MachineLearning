@@ -13,6 +13,42 @@ logger = logging.getLogger(__name__)
 
 class VolumePreprocessor:
     """Utilities for preprocessing CT volume data."""
+
+
+    @staticmethod
+    def clean_and_fix_volume(volume: np.ndarray) -> np.ndarray:
+        """
+        Performs robust data cleaning BEFORE resampling:
+        1. Handles NaNs.
+        2. Detects and removes +1024 Offset (ignoring padding).
+        3. Clips values to remove padding artifacts.
+        """
+        # 1. Cast to float
+        volume = volume.astype(np.float32)
+
+        # 2. Handle NaNs
+        if np.isnan(volume).any():
+            volume = np.nan_to_num(volume, nan=-1000.0)
+
+        # 3. Robust Offset Detection (+1024 fix)
+        # We check a sample of the volume to decide if air is 0 or -1000.
+        # We ignore padding values (< -1500) to avoid false negatives.
+        sample = volume[::4, ::4, ::4].flatten()
+        valid_sample = sample[sample > -1500] 
+
+        if len(valid_sample) > 0:
+            # Check 5th percentile instead of min to be robust against noise
+            low_percentile = np.percentile(valid_sample, 5)
+            if low_percentile > -100:
+                logger.warning("Detected Offset Scan (Air ~ 0). Applying fix: -1024")
+                volume -= 1024.0
+
+        # 4. Hard Clip (The Cleanup)
+        # ONLY NOW we clip. This ensures padding (-3000) becomes -1000 
+        # specifically AFTER we proved it wasn't needed for offset detection.
+        volume = np.clip(volume, -1000.0, 3000.0)
+        
+        return volume
     
     @staticmethod
     def resample_volume(
@@ -69,26 +105,10 @@ class VolumePreprocessor:
             - Soft tissue: -100 to 100 HU
             - Bone: 400+ HU
         """
-        corners = np.concatenate([
-            volume[0, :10, :10].flatten(),
-            volume[0, -10:, -10:].flatten()
-        ])
 
-        if np.nanmin(corners) > -100:
-             logger.warning("Detected Offset Scan. Applying fix: -1024")
-             volume -= 1024
-
-        # 2. טיפול ב-NaN (כדי שלא ישברו את החישובים בהמשך)
-        if np.isnan(volume).any():
-            volume = np.nan_to_num(volume, nan=-1000.0)
-
-        # 3. חישוב גבולות החלון
         lower = center - (width / 2.0)  # בריאות: -1350
         upper = center + (width / 2.0)  # בריאות: 150
 
-        # 4. הקסם של np.interp (מחליף Clip, Subtract, Divide)
-        # הוא ממפה את הטווח [lower, upper] לטווח [0.0, 1.0].
-        # כל מה שמתחת ל-lower הופך ל-0, כל מה שמעל upper הופך ל-1.
         windowed = np.interp(volume, [lower, upper], [0.0, 1.0])
 
         return windowed.astype(np.float32)
