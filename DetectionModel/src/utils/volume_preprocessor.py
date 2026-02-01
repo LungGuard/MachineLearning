@@ -69,28 +69,28 @@ class VolumePreprocessor:
             - Soft tissue: -100 to 100 HU
             - Bone: 400+ HU
         """
+        corners = np.concatenate([
+            volume[0, :10, :10].flatten(),
+            volume[0, -10:, -10:].flatten()
+        ])
 
+        if np.nanmin(corners) > -100:
+             logger.warning("Detected Offset Scan. Applying fix: -1024")
+             volume -= 1024
+
+        # 2. טיפול ב-NaN (כדי שלא ישברו את החישובים בהמשך)
         if np.isnan(volume).any():
             volume = np.nan_to_num(volume, nan=-1000.0)
-        
-        vol_min = volume.min()
-        if vol_min >= -100: 
-             logger.warning(f"Detected Offset Scan (Min val: {vol_min}). Applying fix: -1024")
-             volume = volume - 1024
-             
-             if volume.min() < -3000:
-                 volume = volume + 1024
 
-        window_lower_bound = center - (width / 2.0)
-        window_upper_bound = center + (width / 2.0)
-        
-        windowed = np.clip(volume, window_lower_bound, window_upper_bound)
-        
-        if normalize:
-            windowed = (windowed - window_lower_bound) / width
-                    
-            windowed = np.clip(windowed, 0.0, 1.0)
-        
+        # 3. חישוב גבולות החלון
+        lower = center - (width / 2.0)  # בריאות: -1350
+        upper = center + (width / 2.0)  # בריאות: 150
+
+        # 4. הקסם של np.interp (מחליף Clip, Subtract, Divide)
+        # הוא ממפה את הטווח [lower, upper] לטווח [0.0, 1.0].
+        # כל מה שמתחת ל-lower הופך ל-0, כל מה שמעל upper הופך ל-1.
+        windowed = np.interp(volume, [lower, upper], [0.0, 1.0])
+
         return windowed.astype(np.float32)
     
     @staticmethod

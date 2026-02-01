@@ -84,10 +84,21 @@ class CTScanProcessor:
         if original_spacing is None:
             return None
         
+
+        try:
+            self.logger.debug(f"[{patient_id}] Applying windowing...")
+            windowed_volume = VolumePreprocessor.apply_windowing(
+                volume, self.config.window_center, self.config.window_width
+            )
+            self.logger.debug(f"[{patient_id}] Windowed: min={windowed_volume.min():.3f}, max={windowed_volume.max():.3f}")
+        except Exception as e:
+            self.logger.error(f"[{patient_id}] FAILED at windowing: {e}")
+            return None
+
         try:
             self.logger.debug(f"[{patient_id}] Resampling volume...")
             resampled = VolumePreprocessor.resample_volume(
-                volume, original_spacing, self.config.target_spacing
+                windowed_volume, original_spacing, self.config.target_spacing
             )
             self.logger.debug(f"[{patient_id}] Resampled: shape={resampled.shape}")
         except Exception as e:
@@ -95,18 +106,10 @@ class CTScanProcessor:
             self.logger.debug(traceback.format_exc())
             return None
         
-        try:
-            self.logger.debug(f"[{patient_id}] Applying windowing...")
-            windowed = VolumePreprocessor.apply_windowing(
-                resampled, self.config.window_center, self.config.window_width
-            )
-            self.logger.debug(f"[{patient_id}] Windowed: min={windowed.min():.3f}, max={windowed.max():.3f}")
-        except Exception as e:
-            self.logger.error(f"[{patient_id}] FAILED at windowing: {e}")
-            return None
+
         
-        volume_shape = windowed.shape
-        return windowed, volume_shape, original_spacing
+        volume_shape = resampled.shape
+        return resampled, volume_shape, original_spacing
     
     def extract_valid_nodules(self, scan, patient_id: str) -> List[Tuple]:
         """Extract and filter valid nodules from scan."""
