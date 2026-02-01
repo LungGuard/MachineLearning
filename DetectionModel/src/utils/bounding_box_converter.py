@@ -13,8 +13,9 @@ class BoundingBoxConverter:
     @staticmethod
     def compute_diameter(bbox) -> float:
         """Compute nodule diameter from bounding box."""
-        x_extent = bbox[2][1] - bbox[2][0]
-        y_extent = bbox[1][1] - bbox[1][0]
+        # bbox is a tuple of slice objects: (slice(z1,z2), slice(y1,y2), slice(x1,x2))
+        x_extent = bbox[2].stop - bbox[2].start
+        y_extent = bbox[1].stop - bbox[1].start
         diameter = np.sqrt(x_extent**2 + y_extent**2)
         return float(diameter)
     

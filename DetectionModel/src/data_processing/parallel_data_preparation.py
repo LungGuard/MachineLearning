@@ -3,11 +3,21 @@
 import os
 import sys
 import logging
+import configparser
+import json
 from pathlib import Path
 from typing import Dict, List, Tuple, Any
 from multiprocessing import Pool, cpu_count
 import numpy as np
 import pandas as pd
+
+# Compatibility fixes for newer Python/NumPy versions
+configparser.SafeConfigParser = configparser.ConfigParser
+np.int = np.int64
+np.float = np.float64
+np.bool = np.bool_
+np.object = np.object_
+np.str = np.str_
 
 # Import reusable components from sequential pipeline
 from .offline_data_preparation import (
@@ -39,32 +49,52 @@ PARALLEL_DEFAULT_CONFIG = {
 }
 
 
+# Global variable to store pylidc module in worker processes
+_worker_pl_module = None
+
+
+def _init_worker(data_path: str):
+    """
+    Initialize each worker process with its own pylidc configuration.
+    
+    This is called once per worker when the pool is created.
+    """
+    global _worker_pl_module
+    try:
+        configure_pylidc(data_path)
+        _worker_pl_module = import_pylidc()
+    except Exception as e:
+        logger.error(f"Worker initialization failed: {e}")
+        _worker_pl_module = None
+
+
 def _worker_process_scan(args: Tuple) -> Tuple[str, List[Dict], bool]:
-    """
-    Worker function for multiprocessing - processes a single scan.
+    # מקבלים ID במקום אובייקט
+    patient_id, patient_split, config_dict, directories_dict = args
     
-    This must be a top-level function (not nested) to be picklable.
+    # שימוש במודול הגלובלי שהוטען ב-_init_worker
+    global _worker_pl_module
+    pl = _worker_pl_module
     
-    Args:
-        args: Tuple of (scan, annotations, patient_split, config_dict, directories_dict)
-        
-    Returns:
-        Tuple of (patient_id, metadata_list, success)
-    """
-    scan, annotations, patient_split, config_dict, directories_dict = args
-    
-    # Reconstruct config and directories from dictionaries
+    # שחזור קונפיגורציה
     config = DataPrepConfig(**config_dict)
     directories = {k: Path(v) for k, v in directories_dict.items()}
     
-    patient_id = scan.patient_id
-    
-    # Create processor instance for this worker
-    processor = CTScanProcessor(config, directories)
-    
     try:
-        # Process the scan
-        scan_metadata = processor.process_scan(scan, patient_split, pl=None)
+        # --- השינוי החשוב: שליפה מחדש בתוך ה-Worker ---
+        # שולפים את הסריקה הספציפית של המטופל
+        # (מניחים שיש סריקה אחת למטופל, או שצריך לוגיקה לבחור את הנכונה אם יש כמה)
+        scan = pl.query(pl.Scan).filter(pl.Scan.patient_id == patient_id).first()
+        
+        if not scan:
+            logger.error(f"Worker could not find scan for {patient_id}")
+            return patient_id, [], False
+            
+        # יצירת המעבד
+        processor = CTScanProcessor(config, directories)
+        
+        # הרצה
+        scan_metadata = processor.process_scan(scan, patient_split, pl_module=pl)
         success = len(scan_metadata) > 0
         
         if success:
@@ -74,7 +104,7 @@ def _worker_process_scan(args: Tuple) -> Tuple[str, List[Dict], bool]:
         
     except Exception as e:
         logger.error(f"[{patient_id}] Worker error: {e}")
-        logger.debug(f"Traceback:", exc_info=True)
+        # logger.debug(f"Traceback:", exc_info=True) # זהירות עם לוגים כבדים במקביל
         return patient_id, [], False
 
 
@@ -110,31 +140,72 @@ def run_parallel_data_preparation(config: DataPrepConfig, num_workers: int = Non
     logger.info("[2/6] Creating directories...")
     directories = create_directory_structure(config.output_dir)
     
-    # Step 3: Query and filter scans
-    logger.info("[3/6] Querying LIDC database...")
-    all_scans = pl.query(pl.Scan).all()
-    logger.info(f"Total scans in database: {len(all_scans)}")
+    splits_json_path = directories['metadata'] / 'patient_splits.json'
     
-    scans_with_annotations = filter_scans_with_nodules(all_scans, pl)
-    
-    if len(scans_with_annotations) == 0:
-        logger.error("No scans with nodule annotations found!")
-        csv_path = directories['metadata'] / 'regression_dataset.csv'
-        pd.DataFrame().to_csv(csv_path, index=False)
-        return csv_path
-    
-    # Step 4: Split patients
-    logger.info("[4/6] Splitting patients...")
-    patient_ids = list(set(scan.patient_id for scan, _ in scans_with_annotations))
-    logger.info(f"Unique patients: {len(patient_ids)}")
-    
-    splits = split_patients_by_id(
-        patient_ids,
-        config.train_ratio,
-        config.val_ratio,
-        config.test_ratio,
-        config.random_seed
-    )
+    # Check if patient splits JSON already exists
+    if splits_json_path.exists():
+        logger.info("[3/6] Loading existing patient splits...")
+        with open(splits_json_path, 'r') as f:
+            patient_splits_dict = json.load(f)
+        
+        patient_ids = list(patient_splits_dict.keys())
+        logger.info(f"Loaded {len(patient_ids)} patients from existing splits")
+        
+        # Query only scans for these patients
+        logger.info("[4/6] Querying scans for existing patients...")
+        scans_with_annotations = []
+        for patient_id in patient_ids:
+            try:
+                patient_scans = pl.query(pl.Scan).filter(pl.Scan.patient_id == patient_id).all()
+                for scan in patient_scans:
+                    annotations = scan.cluster_annotations()
+                    if len(annotations) > 0:
+                        scans_with_annotations.append((scan, annotations))
+            except Exception as e:
+                logger.debug(f"Error querying {patient_id}: {e}")
+        
+        logger.info(f"Found {len(scans_with_annotations)} scans with nodules")
+        
+        # Reconstruct splits from loaded data
+        splits = {'train': [], 'val': [], 'test': []}
+        for patient_id, split in patient_splits_dict.items():
+            splits[split].append(patient_id)
+        
+    else:
+        # Original flow: query all scans and filter
+        logger.info("[3/6] Querying LIDC database...")
+        all_scans = pl.query(pl.Scan).all()
+        logger.info(f"Total scans in database: {len(all_scans)}")
+        
+        scans_with_annotations = filter_scans_with_nodules(all_scans, pl)
+        
+        if len(scans_with_annotations) == 0:
+            logger.error("No scans with nodule annotations found!")
+            csv_path = directories['metadata'] / 'regression_dataset.csv'
+            pd.DataFrame().to_csv(csv_path, index=False)
+            return csv_path
+        
+        logger.info("[4/6] Splitting patients...")
+        patient_ids = list(set(scan.patient_id for scan, _ in scans_with_annotations))
+        logger.info(f"Unique patients: {len(patient_ids)}")
+        
+        splits = split_patients_by_id(
+            patient_ids,
+            config.train_ratio,
+            config.val_ratio,
+            config.test_ratio,
+            config.random_seed
+        )
+        
+        # Save patient splits to JSON for future use
+        patient_splits_dict = {}
+        for patient_id in patient_ids:
+            split = get_patient_split(patient_id, splits)
+            patient_splits_dict[patient_id] = split
+        
+        with open(splits_json_path, 'w') as f:
+            json.dump(patient_splits_dict, f, indent=2, sort_keys=True)
+        logger.info(f"Patient splits saved to: {splits_json_path}")
     
     # Step 5: Process scans in parallel
     logger.info("[5/6] Processing scans in parallel...")
@@ -161,8 +232,7 @@ def run_parallel_data_preparation(config: DataPrepConfig, num_workers: int = Non
     for scan, annotations in scans_with_annotations:
         patient_id = scan.patient_id
         patient_split = get_patient_split(patient_id, splits)
-        task_args.append((scan, annotations, patient_split, config_dict, directories_dict))
-    
+        task_args.append((patient_id, patient_split, config_dict, directories_dict))    
     # Process scans in parallel
     all_metadata = []
     successful = 0
@@ -170,7 +240,11 @@ def run_parallel_data_preparation(config: DataPrepConfig, num_workers: int = Non
     
     try:
         # Use 'spawn' method for Windows compatibility
-        with Pool(processes=num_workers) as pool:
+        with Pool(
+            processes=num_workers,
+            initializer=_init_worker,
+            initargs=(config.data_path,)
+        ) as pool:
             # Use imap_unordered for progress tracking
             results = pool.imap_unordered(
                 _worker_process_scan,

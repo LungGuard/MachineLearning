@@ -26,9 +26,11 @@ class NoduleAnnotationProcessor:
     def _safe_extract_centroid(ann):
         """Safely extract centroid from annotation."""
         try:
-            og_centroid = ann.centroid  # Returns (z, y, x) in original space
-            is_valid = og_centroid and len(og_centroid) == 3
-            return og_centroid if is_valid else None
+            centroid = ann.centroid
+            # Validate centroid exists and has correct dimensions
+            if centroid is not None and len(centroid) == 3:
+                return centroid
+            return None
         except Exception:
             return None
     
@@ -155,27 +157,34 @@ class NoduleAnnotationProcessor:
         target_spacing: Tuple[float, float, float] = (1.0, 1.0, 1.0)
     ) -> Optional[Tuple[float, float, float]]:
         """Calculate nodule centroid from annotations, transformed to resampled space."""
-        centroids = list(filter(
-            None, 
-            map(NoduleAnnotationProcessor._safe_extract_centroid, annotations)
-        ))
+        centroids = []
         
-        if not centroids:
+        for ann in annotations:
+            try:
+                centroid = ann.centroid  # Returns (z, y, x) in original space
+                if centroid is not None and len(centroid) == 3:
+                    centroids.append(centroid)
+            except Exception:
+                pass  # Skip failed annotations
+        
+        if len(centroids) == 0:
             return None
-
-        og_space_avg_centroid = tuple(
+        
+        # Average centroid in original space
+        avg_centroid = tuple(
             sum(c[i] for c in centroids) / len(centroids)
             for i in range(RegModelConstants.CENTROID.CENTROID_DIM)
         )
-            
+        
+        # Transform to resampled space if spacing provided
         transformed_centroid = (
             CoordinateTransformer.transform_coordinates_to_resampled(
-                og_space_avg_centroid, original_spacing, target_spacing
+                avg_centroid, original_spacing, target_spacing
             )
             if original_spacing is not None
-            else og_space_avg_centroid
+            else avg_centroid
         )
-            
+        
         # Validate against resampled volume bounds
         z, y, x = transformed_centroid
         is_within_bounds = (
@@ -183,5 +192,5 @@ class NoduleAnnotationProcessor:
             0 <= y < volume_shape[1] and
             0 <= x < volume_shape[2]
         )
-                
+        
         return transformed_centroid if is_within_bounds else None

@@ -4,18 +4,26 @@ import os
 import sys
 import logging
 import configparser
+import json
 from pathlib import Path
 from typing import Dict, List, Tuple
 import numpy as np
 import pandas as pd
 
+# Compatibility fixes for newer Python/NumPy versions
+configparser.SafeConfigParser = configparser.ConfigParser
+np.int = np.int64
+np.float = np.float64
+np.bool = np.bool_
+np.object = np.object_
+np.str = np.str_
 
 logger = logging.getLogger(__name__)
 
 
 DEFAULT_CONFIG = {
-    'data_path': "E:\FinalsProject\Datasets\CancerDetection\images\manifest-1600709154662\LIDC-IDRI",
-    'output_dir': ".\DetectionModel\datasets",
+    'data_path': r"E:\FinalsProject\Datasets\CancerDetection\images\manifest-1600709154662\LIDC-IDRI",
+    'output_dir': r".\DetectionModel\datasets",
     'train_ratio': 0.70,
     'val_ratio': 0.15,
     'test_ratio': 0.15,
@@ -104,7 +112,7 @@ def filter_scans_with_nodules(all_scans: List, pl) -> List[Tuple]:
     for idx, scan in enumerate(all_scans):
         # Progress indicator every 100 scans
         show_progress = (idx + 1) % 100 == 0 or idx == total - 1
-        print(f"\r  Checking scan {idx + 1}/{total}...", end='', flush=True) if show_progress else None
+        logger.info(f"\r  Checking scan {idx + 1}/{total}...") if show_progress else None
         
         try:
             annotations = scan.cluster_annotations()
@@ -132,29 +140,68 @@ def run_data_preparation(config: DataPrepConfig) -> Path:
     logger.info("[2/6] Creating directories...")
     directories = create_directory_structure(config.output_dir)
     
-    logger.info("[3/6] Querying LIDC database...")
-    all_scans = pl.query(pl.Scan).all()
-    logger.info(f"Total scans in database: {len(all_scans)}")
+    splits_json_path = directories['metadata'] / 'patient_splits.json'
     
-    scans_with_annotations = filter_scans_with_nodules(all_scans, pl)
-    
-    if len(scans_with_annotations) == 0:
-        logger.error("No scans with nodule annotations found!")
-        csv_path = directories['metadata'] / 'regression_dataset.csv'
-        pd.DataFrame().to_csv(csv_path, index=False)
-        return csv_path
-    
-    logger.info("[4/6] Splitting patients...")
-    patient_ids = list(set(scan.patient_id for scan, _ in scans_with_annotations))
-    logger.info(f"Unique patients: {len(patient_ids)}")
-    
-    splits = split_patients_by_id(
-        patient_ids,
-        config.train_ratio,
-        config.val_ratio,
-        config.test_ratio,
-        config.random_seed
-    )
+    if splits_json_path.exists():
+        logger.info("[3/6] Loading existing patient splits...")
+        with open(splits_json_path, 'r') as f:
+            patient_splits_dict = json.load(f)
+        
+        patient_ids = list(patient_splits_dict.keys())
+        logger.info(f"Loaded {len(patient_ids)} patients from existing splits")
+        
+        logger.info("[4/6] Querying scans for existing patients...")
+        scans_with_annotations = []
+        for patient_id in patient_ids:
+            try:
+                patient_scans = pl.query(pl.Scan).filter(pl.Scan.patient_id == patient_id).all()
+                for scan in patient_scans:
+                    annotations = scan.cluster_annotations()
+                    if len(annotations) > 0:
+                        scans_with_annotations.append((scan, annotations))
+            except Exception as e:
+                logger.debug(f"Error querying {patient_id}: {e}")
+        
+        logger.info(f"Found {len(scans_with_annotations)} scans with nodules")
+        
+        splits = {'train': [], 'val': [], 'test': []}
+        for patient_id, split in patient_splits_dict.items():
+            splits[split].append(patient_id)
+        
+    else:
+        logger.info("[3/6] Querying LIDC database...")
+        all_scans = pl.query(pl.Scan).all()
+        logger.info(f"Total scans in found: {len(all_scans)}")
+        
+        scans_with_annotations = filter_scans_with_nodules(all_scans, pl)
+        
+        if len(scans_with_annotations) == 0:
+            logger.error("No scans with nodule annotations found!")
+            csv_path = directories['metadata'] / 'regression_dataset.csv'
+            pd.DataFrame().to_csv(csv_path, index=False)
+            return csv_path
+        
+        logger.info("[4/6] Splitting patients...")
+        patient_ids = list(set(scan.patient_id for scan, _ in scans_with_annotations))
+        logger.info(f"Unique patients: {len(patient_ids)}")
+        
+        splits = split_patients_by_id(
+            patient_ids,
+            config.train_ratio,
+            config.val_ratio,
+            config.test_ratio,
+            config.random_seed
+        )
+        
+        # Save patient splits to JSON for future use
+        patient_splits_dict = {}
+        for patient_id in patient_ids:
+            split = get_patient_split(patient_id, splits)
+            patient_splits_dict[patient_id] = split
+        
+        with open(splits_json_path, 'w') as f:
+            json.dump(patient_splits_dict, f, indent=2, sort_keys=True)
+        logger.info(f"Patient splits saved to: {splits_json_path}")
     
     logger.info("[5/6] Processing scans...")
     
@@ -240,7 +287,7 @@ if __name__ == "__main__":
         #'data_path': '/path/to/LIDC-IDRI',  # REQUIRED: Set your LIDC-IDRI path
         # 'output_dir': './my_custom_output',  # Uncomment to change output directory
         # 'min_diameter': 5.0,  # Uncomment to change minimum nodule diameter
-        # 'debug': True,  # Uncomment for debug logging
+        'debug': True,  # Uncomment for debug logging
     }
     
     result_path = main(config_overrides)

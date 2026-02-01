@@ -26,7 +26,7 @@ def test_parallel_pipeline():
     
     # Test configuration
     config_overrides = {
-        'data_path': 'D:/LIDC-IDRI',  # Update this to your actual path
+        'data_path': r"E:\FinalsProject\Datasets\CancerDetection\images\manifest-1600709154662\LIDC-IDRI",  # Update this to your actual path
         'output_dir': './test_parallel_output',
         'train_ratio': 0.70,
         'val_ratio': 0.15,
@@ -66,14 +66,19 @@ def test_parallel_pipeline():
         
         # Load and display summary
         import pandas as pd
-        df = pd.read_csv(result_path)
-        
-        print(f"\n  Dataset Summary:")
-        print(f"    Total samples: {len(df)}")
-        print(f"    Train: {len(df[df['split'] == 'train'])}")
-        print(f"    Val: {len(df[df['split'] == 'val'])}")
-        print(f"    Test: {len(df[df['split'] == 'test'])}")
-        print(f"    Unique patients: {df['patient_id'].nunique()}")
+        try:
+            df = pd.read_csv(result_path)
+            
+            print(f"\n  Dataset Summary:")
+            print(f"    Total samples: {len(df)}")
+            print(f"    Train: {len(df[df['split'] == 'train'])}")
+            print(f"    Val: {len(df[df['split'] == 'val'])}")
+            print(f"    Test: {len(df[df['split'] == 'test'])}")
+            print(f"    Unique patients: {df['patient_id'].nunique()}")
+        except pd.errors.EmptyDataError:
+            print(f"\n  Dataset Summary:")
+            print(f"    ⚠ No samples were generated (empty CSV)")
+            print(f"    This likely means all scans failed processing")
         
     except Exception as e:
         elapsed_time = time.time() - start_time

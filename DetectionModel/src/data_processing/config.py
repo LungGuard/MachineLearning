@@ -8,7 +8,7 @@ from typing import Tuple
 class DataPrepConfig:
     """Pipeline configuration parameters."""
     
-    data_path: str = "/data/LIDC-IDRI"
+    data_path: str = "E:\FinalsProject\Datasets\CancerDetection\images\manifest-1600709154662\LIDC-IDRI"
     output_dir: str = "./lungguard_dataset"
     
     train_ratio: float = 0.70

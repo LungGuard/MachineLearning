@@ -28,6 +28,8 @@ class VolumePreprocessor:
         
         Returns a Resampled 3D volume with target spacing
         """
+        volume = volume.astype(np.float32)
+        
         zoom_factors = tuple(
             orig / target 
             for orig, target in zip(original_spacing, target_spacing)
@@ -67,6 +69,18 @@ class VolumePreprocessor:
             - Soft tissue: -100 to 100 HU
             - Bone: 400+ HU
         """
+
+        if np.isnan(volume).any():
+            volume = np.nan_to_num(volume, nan=-1000.0)
+        
+        vol_min = volume.min()
+        if vol_min >= -100: 
+             logger.warning(f"Detected Offset Scan (Min val: {vol_min}). Applying fix: -1024")
+             volume = volume - 1024
+             
+             if volume.min() < -3000:
+                 volume = volume + 1024
+
         window_lower_bound = center - (width / 2.0)
         window_upper_bound = center + (width / 2.0)
         

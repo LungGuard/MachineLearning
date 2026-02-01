@@ -217,7 +217,7 @@ class CTScanProcessor:
                 RegModelConstants.NOUDLE_INDEX: nodule_idx,
                 RegModelConstants.SLICE_INDEX: slice_idx,
                 RegModelConstants.Features.FEATURE_DIAMETER_MM: features[RegModelConstants.Features.FEATURE_DIAMETER_MM],
-                f'{RegModelConstants.Features.FEATURE_MALIGNANCY}_score': features[RegModelConstants.Features.FEATURE_MALIGNANCY],
+                RegModelConstants.Features.FEATURE_MALIGNANCY: features[RegModelConstants.Features.FEATURE_MALIGNANCY],
                 RegModelConstants.Features.FEATURE_SPICULATION: features[RegModelConstants.Features.FEATURE_SPICULATION],
                 RegModelConstants.Features.FEATURE_LOBULATION: features[RegModelConstants.Features.FEATURE_LOBULATION],
                 RegModelConstants.Features.FEATURE_SUBTLETY: features[RegModelConstants.Features.FEATURE_SUBTLETY],
