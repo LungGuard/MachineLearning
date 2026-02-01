@@ -14,8 +14,8 @@ logger = logging.getLogger(__name__)
 
 
 DEFAULT_CONFIG = {
-    'data_path': '/path/to/LIDC-IDRI',  # TODO: Set your LIDC-IDRI path
-    'output_dir': './lungguard_dataset',
+    'data_path': "E:\FinalsProject\Datasets\CancerDetection\images\manifest-1600709154662\LIDC-IDRI",
+    'output_dir': ".\DetectionModel\datasets",
     'train_ratio': 0.70,
     'val_ratio': 0.15,
     'test_ratio': 0.15,
@@ -125,21 +125,17 @@ def run_data_preparation(config: DataPrepConfig) -> Path:
     logger.info("LungGuard Data Preparation Pipeline")
     logger.info("=" * 50)
     
-    # Step 1: Configure pylidc
     logger.info("[1/6] Configuring PyLIDC...")
     configure_pylidc(config.data_path)
     pl = import_pylidc()
     
-    # Step 2: Create directories
     logger.info("[2/6] Creating directories...")
     directories = create_directory_structure(config.output_dir)
     
-    # Step 3: Query and filter scans (OPTIMIZED - single pass)
     logger.info("[3/6] Querying LIDC database...")
     all_scans = pl.query(pl.Scan).all()
     logger.info(f"Total scans in database: {len(all_scans)}")
     
-    # Filter scans and keep annotations (avoids calling cluster_annotations twice)
     scans_with_annotations = filter_scans_with_nodules(all_scans, pl)
     
     if len(scans_with_annotations) == 0:
@@ -148,7 +144,6 @@ def run_data_preparation(config: DataPrepConfig) -> Path:
         pd.DataFrame().to_csv(csv_path, index=False)
         return csv_path
     
-    # Step 4: Split patients
     logger.info("[4/6] Splitting patients...")
     patient_ids = list(set(scan.patient_id for scan, _ in scans_with_annotations))
     logger.info(f"Unique patients: {len(patient_ids)}")
@@ -161,10 +156,8 @@ def run_data_preparation(config: DataPrepConfig) -> Path:
         config.random_seed
     )
     
-    # Step 5: Process scans
     logger.info("[5/6] Processing scans...")
     
-    # Create processor instance once (reuse for all scans)
     processor = CTScanProcessor(config, directories)
     
     all_metadata = []
@@ -176,7 +169,6 @@ def run_data_preparation(config: DataPrepConfig) -> Path:
         patient_id = scan.patient_id
         split = get_patient_split(patient_id, splits)
         
-        # Progress display
         show_progress = (idx + 1) % config.log_freq == 0 or idx == 0 or idx == total_scans - 1
         logger.info(f"  [{idx + 1}/{total_scans}] {patient_id} ({split})") if show_progress else None
         
@@ -198,7 +190,6 @@ def run_data_preparation(config: DataPrepConfig) -> Path:
     logger.info(f"Processing complete: {successful} OK, {failed} failed")
     logger.info(f"Total samples: {len(all_metadata)}")
     
-    # Step 6: Save outputs
     logger.info("[6/6] Saving outputs...")
     csv_path = directories['metadata'] / 'regression_dataset.csv'
     metadata_df = save_metadata_csv(all_metadata, csv_path)
@@ -246,7 +237,7 @@ if __name__ == "__main__":
 
     
     config_overrides = {
-        'data_path': '/path/to/LIDC-IDRI',  # REQUIRED: Set your LIDC-IDRI path
+        #'data_path': '/path/to/LIDC-IDRI',  # REQUIRED: Set your LIDC-IDRI path
         # 'output_dir': './my_custom_output',  # Uncomment to change output directory
         # 'min_diameter': 5.0,  # Uncomment to change minimum nodule diameter
         # 'debug': True,  # Uncomment for debug logging
