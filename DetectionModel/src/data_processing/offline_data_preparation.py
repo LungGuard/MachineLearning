@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Dict, List, Tuple
 import numpy as np
 import pandas as pd
+import shutil
 
 # Compatibility fixes for newer Python/NumPy versions
 configparser.SafeConfigParser = configparser.ConfigParser
@@ -96,6 +97,22 @@ def create_directory_structure(output_dir: str) -> Dict[str, Path]:
     }
     
     for name, path in directories.items():
+        cleanup_needed = name != 'metadata'
+        
+        path_exists = path.exists()
+        should_remove = cleanup_needed and path_exists
+        shutil.rmtree(path) if should_remove else None
+        
+        is_metadata = name == 'metadata'
+        should_clean_files = is_metadata and path_exists
+        
+        if should_clean_files:
+            for file_path in path.iterdir():
+                is_file = file_path.is_file()
+                is_patient_splits = file_path.name.startswith("patient_splits")
+                should_delete = is_file and not is_patient_splits
+                file_path.unlink() if should_delete else None
+        
         path.mkdir(parents=True, exist_ok=True)
     
     logger.info(f"Output directory: {base_path}")

@@ -45,3 +45,16 @@ class RegModelConstants:
         VOLUME_DEPTH = 'volume_depth'
         VOLUME_HEIGHT = 'volume_height'
         VOLUME_WIDTH = 'volume_width'
+
+class PreProcessingConstants:
+    class HU_VALUES:
+        """
+        CT Scanners doesnt outputs physical values, but raw values that are easy for it store, 
+        in order to process the scans we need to convert the images to HU(Hounsfield Units) - the universal scale for matter density
+        HU = pixel_value x slope + intercept
+        """
+        AIR_HU = -1000
+    
+    TARGET_SPACING = (1.0,1.0,1.0)
+    WINDOW_CENTER = -600.0
+    WINDOW_WIDTH = 1500.0

@@ -1,151 +1,405 @@
-import numpy as np
+"""
+Diagnostic Script: Identify Problematic CT Slice Images
+
+This script analyzes all generated images and identifies which ones are:
+1. Completely blank (uniform/no variation)
+2. Too dark (no lung tissue visible)
+3. Too bright/washed out (grey screen issue)
+4. Missing proper lung structure
+
+A valid lung CT slice should have:
+- Black background (air outside body)
+- Dark grey lung regions
+- Light grey/white soft tissue and bone
+- Significant pixel variation (std > threshold)
+
+Output: CSV report with problematic images and their scan info
+"""
+
 import cv2
-import os
+import numpy as np
+import pandas as pd
 from pathlib import Path
-import configparser
-from .pylidc_config import configure_pylidc,import_pylidc
-from .config import DataPrepConfig
-configparser.SafeConfigParser = configparser.ConfigParser
-np.int = np.int64
-np.float = np.float64
-np.bool = np.bool_
-np.object = np.object_
-np.str = np.str_
+from typing import Dict, List, Tuple
+from dataclasses import dataclass
+from collections import defaultdict
+import re
+import logging
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 
-DEFAULT_CONFIG = {
-    'data_path': r"E:\FinalsProject\Datasets\CancerDetection\images\manifest-1600709154662\LIDC-IDRI",
-    'output_dir': r".\DetectionModel\datasets",
-    'train_ratio': 0.70,
-    'val_ratio': 0.15,
-    'test_ratio': 0.15,
-    'min_diameter': 3.0,
-    'max_diameter': 100.0,
-    'slices_per_nodule': 3,
-    'seed': 42,
-    'debug': False,
-    'log_freq': 5
-}
+@dataclass
+class ImageAnalysis:
+    """Analysis results for a single image."""
+    filepath: str
+    patient_id: str
+    nodule_idx: int
+    slice_idx: int
+    
+    # Basic statistics
+    mean: float
+    std: float
+    min_val: int
+    max_val: int
+    
+    # Histogram analysis
+    dark_pixel_ratio: float      # pixels < 50 (should be high for valid CT)
+    mid_pixel_ratio: float       # pixels 50-200
+    bright_pixel_ratio: float    # pixels > 200
+    
+    # Problem flags
+    is_uniform: bool             # std < threshold (blank image)
+    is_too_dark: bool            # almost all black
+    is_too_bright: bool          # almost all bright (grey screen)
+    is_missing_contrast: bool    # no proper dark/light regions
+    
+    # Overall verdict
+    is_problematic: bool
+    problem_type: str
 
 
-config = DataPrepConfig(
-        data_path=DEFAULT_CONFIG['data_path'],
-        output_dir=DEFAULT_CONFIG['output_dir'],
-        train_ratio=DEFAULT_CONFIG['train_ratio'],
-        val_ratio=DEFAULT_CONFIG['val_ratio'],
-        test_ratio=DEFAULT_CONFIG['test_ratio'],
-        min_nodule_diameter=DEFAULT_CONFIG['min_diameter'],
-        max_nodule_diameter=DEFAULT_CONFIG['max_diameter'],
-        slices_per_nodule=DEFAULT_CONFIG['slices_per_nodule'],
-        random_seed=DEFAULT_CONFIG['seed'],
-        log_freq=DEFAULT_CONFIG['log_freq']
+def parse_filename(filename: str) -> Tuple[str, int, int]:
+    """
+    Extract patient_id, nodule_idx, slice_idx from filename.
+    Format: {patient_id}_n{nodule_idx:02d}_z{slice_idx:04d}.jpg
+    Example: LIDC-IDRI-0001_n00_z0125.jpg
+    """
+    # Remove extension
+    name = Path(filename).stem
+    
+    # Pattern: everything before _n is patient_id, then nodule and slice
+    pattern = r'^(.+)_n(\d+)_z(\d+)$'
+    match = re.match(pattern, name)
+    
+    if match:
+        patient_id = match.group(1)
+        nodule_idx = int(match.group(2))
+        slice_idx = int(match.group(3))
+        return patient_id, nodule_idx, slice_idx
+    
+    # Fallback
+    return name, -1, -1
+
+
+def analyze_image(filepath: Path) -> ImageAnalysis:
+    """Analyze a single image for quality issues."""
+    
+    # Read image
+    img = cv2.imread(str(filepath))
+    
+    if img is None:
+        patient_id, nodule_idx, slice_idx = parse_filename(filepath.name)
+        return ImageAnalysis(
+            filepath=str(filepath),
+            patient_id=patient_id,
+            nodule_idx=nodule_idx,
+            slice_idx=slice_idx,
+            mean=0, std=0, min_val=0, max_val=0,
+            dark_pixel_ratio=0, mid_pixel_ratio=0, bright_pixel_ratio=0,
+            is_uniform=True, is_too_dark=True, is_too_bright=False,
+            is_missing_contrast=True,
+            is_problematic=True,
+            problem_type="UNREADABLE"
+        )
+    
+    # Convert to grayscale for analysis
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    
+    # Basic statistics
+    mean_val = float(gray.mean())
+    std_val = float(gray.std())
+    min_val = int(gray.min())
+    max_val = int(gray.max())
+    
+    # Pixel distribution analysis
+    total_pixels = gray.size
+    dark_pixels = np.sum(gray < 50)
+    mid_pixels = np.sum((gray >= 50) & (gray <= 200))
+    bright_pixels = np.sum(gray > 200)
+    
+    dark_ratio = dark_pixels / total_pixels
+    mid_ratio = mid_pixels / total_pixels
+    bright_ratio = bright_pixels / total_pixels
+    
+    # Problem detection thresholds
+    UNIFORM_STD_THRESHOLD = 10.0        # Very low variation = blank
+    TOO_DARK_THRESHOLD = 0.95           # >95% dark pixels = mostly black
+    TOO_BRIGHT_MEAN_THRESHOLD = 180     # Mean > 180 = grey screen
+    MIN_DARK_RATIO = 0.20               # Valid CT should have >20% dark (air/background)
+    MIN_CONTRAST_RANGE = 100            # max - min should be > 100
+    
+    # Detect problems
+    is_uniform = std_val < UNIFORM_STD_THRESHOLD
+    is_too_dark = dark_ratio > TOO_DARK_THRESHOLD
+    is_too_bright = mean_val > TOO_BRIGHT_MEAN_THRESHOLD
+    is_missing_contrast = (max_val - min_val) < MIN_CONTRAST_RANGE
+    
+    # Additional check: valid lung CT should have dark background
+    # If dark_ratio is very low, it might be grey screen
+    has_no_dark_background = dark_ratio < MIN_DARK_RATIO and mean_val > 100
+    
+    # Determine problem type
+    problem_types = []
+    is_problematic = False
+    
+    if is_uniform:
+        problem_types.append("UNIFORM/BLANK")
+        is_problematic = True
+    
+    if is_too_dark:
+        problem_types.append("TOO_DARK")
+        is_problematic = True
+    
+    if is_too_bright:
+        problem_types.append("TOO_BRIGHT/GREY_SCREEN")
+        is_problematic = True
+    
+    if is_missing_contrast and not is_uniform:
+        problem_types.append("LOW_CONTRAST")
+        is_problematic = True
+    
+    if has_no_dark_background and not is_too_bright:
+        problem_types.append("NO_DARK_BACKGROUND")
+        is_problematic = True
+    
+    problem_type = "; ".join(problem_types) if problem_types else "OK"
+    
+    # Parse filename
+    patient_id, nodule_idx, slice_idx = parse_filename(filepath.name)
+    
+    return ImageAnalysis(
+        filepath=str(filepath),
+        patient_id=patient_id,
+        nodule_idx=nodule_idx,
+        slice_idx=slice_idx,
+        mean=round(mean_val, 2),
+        std=round(std_val, 2),
+        min_val=min_val,
+        max_val=max_val,
+        dark_pixel_ratio=round(dark_ratio, 4),
+        mid_pixel_ratio=round(mid_ratio, 4),
+        bright_pixel_ratio=round(bright_ratio, 4),
+        is_uniform=is_uniform,
+        is_too_dark=is_too_dark,
+        is_too_bright=is_too_bright,
+        is_missing_contrast=is_missing_contrast,
+        is_problematic=is_problematic,
+        problem_type=problem_type
     )
 
 
-configure_pylidc(config.data_path)
-
-pl=import_pylidc()
-
-# --- הגדרת התיקון (אותה פונקציה שנתתי לך קודם) ---
-def robust_windowing(volume, center=-600, width=1500):
-    # הגנה מפני NaN
-    if np.isnan(volume).any():
-        print("  [!] Warning: NaN values found! Fixing...")
-        volume = np.nan_to_num(volume, nan=-1000.0)
-
-    # בדיקת טווחים (Offset Check)
-    vol_min, vol_max = volume.min(), volume.max()
+def analyze_directory(image_dir: Path) -> List[ImageAnalysis]:
+    """Analyze all images in a directory."""
+    results = []
     
-    # אם המינימום גבוה מדי (למשל 0 במקום -1000), כנראה שיש Offset
-    if vol_min >= 0:
-        print(f"  [!] Detected Offset issue (Min: {vol_min}). Trying to fix...")
-        volume = volume - 1024  # תיקון נפוץ ל-CT
-        if volume.min() < -2000: # אם תיקנו יותר מדי
-             volume = volume + 1024 # בטל תיקון
-
-    # ביצוע ה-Windowing
-    lower = center - (width / 2.0)
-    upper = center + (width / 2.0)
+    image_files = list(image_dir.glob("*.jpg")) + list(image_dir.glob("*.png"))
+    total = len(image_files)
     
-    # Clip ו-Normalize
-    windowed = np.clip(volume, lower, upper)
-    windowed = (windowed - lower) / width
+    logger.info(f"Analyzing {total} images in {image_dir}...")
     
-    # *** התיקון הקריטי למניעת שלג/רעש ***
-    windowed = np.clip(windowed, 0.0, 1.0)
-    
-    return (windowed * 255.0).astype(np.uint8)
-
-def main():
-    # הגדרות
-    OUTPUT_DIR = "debug_preview"
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
-    
-    print("Querying LIDC database...")
-    scans = pl.query(pl.Scan).all()
-    
-    print(f"Found {len(scans)} scans. Starting rapid diagnosis...")
-    print(f"Saving previews to: {os.path.abspath(OUTPUT_DIR)}")
-    print("-" * 50)
-
-    # נבדוק 20 סריקות אקראיות (או את כולן אם אתה רוצה, אבל זה ייקח זמן)
-    # כדי למצוא בעיות מהר, נרוץ על קפיצות
-    problematic_found = 0
-    
-    # רוץ על כל הסריקות בקפיצות של 10 (כדי לקבל מדגם מייצג מהר)
-    for i in range(0, len(scans), 10): 
-        scan = scans[i]
-        pid = scan.patient_id
+    for idx, filepath in enumerate(image_files):
+        if (idx + 1) % 100 == 0:
+            logger.info(f"  Progress: {idx + 1}/{total}")
         
-        try:
-            print(f"Checking {pid}...", end="", flush=True)
-            
-            # טעינת הנפח (DICOM)
-            vol = scan.to_volume()
-            
-            # בדיקת סטטיסטיקה גולמית
-            v_min, v_max, v_mean = vol.min(), vol.max(), vol.mean()
-            
-            # לוגיקה לזיהוי "סריקה בעייתית" פוטנציאלית
-            is_suspicious = False
-            if v_min > -500: # ב-CT תקין תמיד יש אוויר (-1000)
-                print(f" SUSPICIOUS! (High Min: {v_min})", end="")
-                is_suspicious = True
-            elif v_max < 500: # ב-CT תקין תמיד יש עצם (+400 ומעלה)
-                print(f" SUSPICIOUS! (Low Max: {v_max})", end="")
-                is_suspicious = True
-            else:
-                print(" OK.", end="")
+        analysis = analyze_image(filepath)
+        results.append(analysis)
+    
+    return results
 
-            # אנחנו נשמור תמונה אם היא חשודה, או סתם אחת ל-5 תקינות כדי לוודא
-            if is_suspicious or (i % 50 == 0):
-                # הפעלת התיקון
-                processed_vol = robust_windowing(vol)
-                
-                # שליפת סלייס אמצעי
-                mid_slice = processed_vol.shape[0] // 2
-                img = processed_vol[mid_slice]
-                
-                # שמירה
-                status = "BAD" if is_suspicious else "OK"
-                fname = f"{OUTPUT_DIR}/{status}_{pid}_slice{mid_slice}.jpg"
-                cv2.imwrite(fname, img)
-                
-                if is_suspicious:
-                    problematic_found += 1
+
+def generate_report(results: List[ImageAnalysis], output_dir: Path) -> Dict:
+    """Generate analysis report and save to CSV."""
+    
+    # Convert to DataFrame
+    df = pd.DataFrame([vars(r) for r in results])
+    
+    # Summary statistics
+    total_images = len(df)
+    problematic_images = df[df['is_problematic']]
+    num_problematic = len(problematic_images)
+    
+    # Group by problem type
+    problem_counts = problematic_images['problem_type'].value_counts().to_dict()
+    
+    # Group by patient
+    problems_by_patient = problematic_images.groupby('patient_id').size().sort_values(ascending=False)
+    
+    # Patients with ALL images problematic vs SOME
+    patient_stats = df.groupby('patient_id').agg({
+        'is_problematic': ['sum', 'count']
+    })
+    patient_stats.columns = ['problematic_count', 'total_count']
+    patient_stats['problematic_ratio'] = patient_stats['problematic_count'] / patient_stats['total_count']
+    
+    all_problematic_patients = patient_stats[patient_stats['problematic_ratio'] == 1.0].index.tolist()
+    some_problematic_patients = patient_stats[
+        (patient_stats['problematic_ratio'] > 0) & (patient_stats['problematic_ratio'] < 1.0)
+    ].index.tolist()
+    
+    # Per-split statistics
+    split_stats = {}
+    if 'split' in df.columns:
+        for split_name in df['split'].unique():
+            split_df = df[df['split'] == split_name]
+            split_problematic = split_df[split_df['is_problematic']]
+            split_stats[split_name] = {
+                'total': len(split_df),
+                'problematic': len(split_problematic),
+                'ratio': round(len(split_problematic) / len(split_df), 4) if len(split_df) > 0 else 0
+            }
+    
+    # Save full results
+    full_csv_path = output_dir / "image_analysis_full.csv"
+    df.to_csv(full_csv_path, index=False)
+    
+    # Save only problematic images
+    problematic_csv_path = output_dir / "problematic_images.csv"
+    problematic_images.to_csv(problematic_csv_path, index=False)
+    
+    # Save patient-level summary
+    patient_summary_path = output_dir / "patient_summary.csv"
+    patient_stats.to_csv(patient_summary_path)
+    
+    # Generate summary report
+    summary = {
+        "total_images": total_images,
+        "problematic_images": num_problematic,
+        "problematic_ratio": round(num_problematic / total_images, 4) if total_images > 0 else 0,
+        "problem_counts": problem_counts,
+        "split_stats": split_stats,
+        "patients_all_problematic": all_problematic_patients,
+        "patients_some_problematic": some_problematic_patients,
+        "output_files": {
+            "full_analysis": str(full_csv_path),
+            "problematic_only": str(problematic_csv_path),
+            "patient_summary": str(patient_summary_path)
+        }
+    }
+    
+    return summary
+
+
+def print_summary(summary: Dict):
+    """Print formatted summary to console."""
+    print("\n" + "=" * 70)
+    print("IMAGE QUALITY ANALYSIS REPORT")
+    print("=" * 70)
+    
+    print(f"\n📊 OVERALL STATISTICS:")
+    print(f"   Total images analyzed: {summary['total_images']}")
+    print(f"   Problematic images: {summary['problematic_images']} ({summary['problematic_ratio']:.1%})")
+    
+    # Per-split statistics
+    if summary.get('split_stats'):
+        print(f"\n📈 PER-SPLIT BREAKDOWN:")
+        for split_name in sorted(summary['split_stats'].keys()):
+            stats = summary['split_stats'][split_name]
+            print(f"   {split_name.capitalize():5s}: {stats['problematic']:4d}/{stats['total']:4d} problematic ({stats['ratio']:.1%})")
+    
+    print(f"\n🔴 PROBLEM BREAKDOWN:")
+    for problem_type, count in summary['problem_counts'].items():
+        print(f"   {problem_type}: {count}")
+    
+    print(f"\n👤 PATIENT ANALYSIS:")
+    all_prob = summary['patients_all_problematic']
+    some_prob = summary['patients_some_problematic']
+    
+    print(f"   Patients with ALL images problematic: {len(all_prob)}")
+    if all_prob:
+        print(f"      Examples: {all_prob[:10]}{'...' if len(all_prob) > 10 else ''}")
+    
+    print(f"   Patients with SOME images problematic: {len(some_prob)}")
+    if some_prob:
+        print(f"      Examples: {some_prob[:10]}{'...' if len(some_prob) > 10 else ''}")
+    
+    print(f"\n📁 OUTPUT FILES:")
+    for name, path in summary['output_files'].items():
+        print(f"   {name}: {path}")
+    
+    print("\n" + "=" * 70)
+    
+    # Diagnosis
+    print("\n🔍 DIAGNOSIS:")
+    
+    if len(all_prob) > 0 and len(some_prob) == 0:
+        print("   → ALL problematic images come from specific patients")
+        print("   → This suggests a SCAN-LEVEL issue (offset, corrupted data)")
+        print("   → Check these patients' raw DICOM data")
+    
+    elif len(some_prob) > len(all_prob):
+        print("   → Problems occur randomly across patients")
+        print("   → This suggests a SLICE-LEVEL issue (coordinate transform, slice selection)")
+        print("   → Check the slice index calculation logic")
+    
+    elif summary['problematic_ratio'] > 0.5:
+        print("   → More than half of images are problematic")
+        print("   → This suggests a PIPELINE-WIDE issue (windowing, preprocessing)")
+        print("   → Check the volume preprocessing steps")
+    
+    print("=" * 70 + "\n")
+
+
+def main(dataset_dir: str, output_dir: str = None):
+    """
+    Main entry point.
+    
+    Args:
+        dataset_dir: Path to the YOLO dataset directory (containing train/val/test subdirs)
+        output_dir: Where to save the reports (defaults to dataset_dir/analysis)
+    """
+    dataset_path = Path(dataset_dir)
+    output_path = Path(output_dir) if output_dir else dataset_path / "analysis"
+    output_path.mkdir(parents=True, exist_ok=True)
+    
+    all_results = []
+    
+    # Analyze each split
+    for split in ['train', 'val', 'test']:
+        image_dir = dataset_path / split / 'images'
+        
+        if image_dir.exists():
+            logger.info(f"\n{'='*50}")
+            logger.info(f"Analyzing {split} split...")
+            logger.info(f"{'='*50}")
             
-            print() # ירידת שורה
+            results = analyze_directory(image_dir)
+            
+            # Add split info
+            for r in results:
+                r.split = split
+            
+            all_results.extend(results)
+            
+            # Quick summary for this split
+            problematic = sum(1 for r in results if r.is_problematic)
+            logger.info(f"  {split}: {problematic}/{len(results)} problematic")
+        else:
+            logger.warning(f"  {split}/images directory not found, skipping")
+    
+    if not all_results:
+        logger.error("No images found to analyze!")
+        return
+    
+    # Generate full report
+    logger.info("\nGenerating report...")
+    summary = generate_report(all_results, output_path)
+    
+    print_summary(summary)
+    
+    return summary
 
-        except Exception as e:
-            print(f" Error: {e}")
-
-        # אם מצאנו 5 בעייתיות ותיקנו אותן - אפשר לעצור ולבדוק
-        if problematic_found >= 5:
-            print("\nFound enough suspicious scans for testing. Stopping.")
-            break
-
-    print("-" * 50)
-    print("Done. Check the 'debug_preview' folder now.")
 
 if __name__ == "__main__":
-    main()
+    import sys
+    
+    if len(sys.argv) < 2:
+        print("Usage: python diagnose_images.py <dataset_dir> [output_dir]")
+        print("Example: python diagnose_images.py ./DetectionModel/datasets")
+        sys.exit(1)
+    
+    dataset_dir = sys.argv[1]
+    output_dir = sys.argv[2] if len(sys.argv) > 2 else None
+    
+    main(dataset_dir, output_dir)

@@ -167,19 +167,28 @@ class CTScanProcessor:
     ) -> Optional[Dict]:
         """Process single slice: create 2.5D image, compute bbox, save, generate metadata."""
         try:
-            # Create 2.5D image
-            image_25d = VolumePreprocessor.create_25d_sandwich(windowed, slice_idx)
+            # Get target size from config (default to None for backwards compatibility)
+            target_size = getattr(self.config, 'output_image_size', None)
+            preserve_aspect = getattr(self.config, 'preserve_aspect_ratio', True)
+
+            # Create 2.5D image with optional resizing
+            image_25d = VolumePreprocessor.create_25d_sandwich(
+                windowed,
+                slice_idx,
+                target_size=target_size,
+                preserve_aspect_ratio=preserve_aspect
+            )
             self.logger.debug(
                 f"[{patient_id}] Slice {slice_idx}: image shape={image_25d.shape}, "
                 f"dtype={image_25d.dtype}, range=[{image_25d.min()}, {image_25d.max()}]"
             )
-            
+
             # Validate image
             if image_25d is None or image_25d.size == 0:
                 self.logger.warning(f"[{patient_id}] Slice {slice_idx}: invalid image")
                 return None
-            
-            # Compute bbox
+
+            # Compute bbox in original volume coordinates
             bbox = BoundingBoxConverter.compute_nodule_bbox_yolo(
                 centroid,
                 features[RegModelConstants.Features.FEATURE_DIAMETER_MM],
@@ -187,6 +196,17 @@ class CTScanProcessor:
                 self.config.target_spacing,
                 self.config.bbox_padding_factor
             )
+
+            # Adjust bbox for resize if target_size is specified
+            if target_size is not None and bbox is not None:
+                original_size = (volume_shape[1], volume_shape[2])  # (height, width)
+                bbox = BoundingBoxConverter.adjust_bbox_for_resize(
+                    bbox,
+                    original_size,
+                    target_size,
+                    preserve_aspect_ratio=preserve_aspect
+                )
+
             self.logger.debug(f"[{patient_id}] Slice {slice_idx}: bbox={bbox}")
             
             if bbox is None:

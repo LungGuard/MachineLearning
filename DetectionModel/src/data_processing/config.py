@@ -22,9 +22,12 @@ class DataPrepConfig:
     
     bbox_padding_factor: float = 1.5
     class_id: int = 0  # 0 = nodule/anomaly
-    
-    
-    min_nodule_diameter: float = 3.0  #mm
+
+    # Output image size for YOLO (all images will be resized to this)
+    output_image_size: Tuple[int, int] = (512, 512)  # (height, width)
+    preserve_aspect_ratio: bool = True  # Preserve aspect ratio with black padding
+
+    min_nodule_diameter: float = 3.0  # mm
     max_nodule_diameter: float = 100.0  #mm
     slices_per_nodule: int = 3 
     

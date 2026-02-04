@@ -5,6 +5,9 @@ Utilities for converting bounding boxes to YOLO format.
 
 import numpy as np
 from typing import Tuple, Optional
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class BoundingBoxConverter:
@@ -77,9 +80,78 @@ class BoundingBoxConverter:
         result = (
             (float(x_norm), float(y_norm), float(w_norm), float(h_norm))
             if is_valid_bbox_bounds
-            else (float(x_norm), float(y_norm), 
-                  float(min(w_norm, 2*min(x_norm, 1-x_norm))), 
+            else (float(x_norm), float(y_norm),
+                  float(min(w_norm, 2*min(x_norm, 1-x_norm))),
                   float(min(h_norm, 2*min(y_norm, 1-y_norm))))
         )
-        
+
         return result
+
+    @staticmethod
+    def adjust_bbox_for_resize(
+        original_bbox: Tuple[float, float, float, float],
+        original_size: Tuple[int, int],
+        target_size: Tuple[int, int],
+        preserve_aspect_ratio: bool = True
+    ) -> Tuple[float, float, float, float]:
+        """
+        Adjust YOLO bbox coordinates when image is resized.
+
+        When an image is resized (especially with aspect ratio preservation and padding),
+        the bounding box coordinates must be transformed to match the new image space.
+
+        Args:
+            original_bbox: (x_center, y_center, width, height) in normalized [0, 1] coordinates
+            original_size: (height, width) of original image
+            target_size: (height, width) of target image
+            preserve_aspect_ratio: Whether aspect ratio was preserved (with padding)
+
+        Returns:
+            Adjusted bbox (x_center, y_center, width, height) in normalized coordinates
+        """
+        x_c, y_c, w, h = original_bbox
+        orig_h, orig_w = original_size
+        target_h, target_w = target_size
+
+        if not preserve_aspect_ratio:
+            # Simple resize: coordinates remain the same in normalized space
+            return original_bbox
+
+        # Calculate scale and offsets for aspect-preserved resize
+        scale = min(target_h / orig_h, target_w / orig_w)
+        new_h = int(orig_h * scale)
+        new_w = int(orig_w * scale)
+
+        y_offset = (target_h - new_h) / 2.0
+        x_offset = (target_w - new_w) / 2.0
+
+        # Convert from normalized original to pixel original
+        x_c_px = x_c * orig_w
+        y_c_px = y_c * orig_h
+        w_px = w * orig_w
+        h_px = h * orig_h
+
+        # Apply scale and offset
+        x_c_px_scaled = x_c_px * scale + x_offset
+        y_c_px_scaled = y_c_px * scale + y_offset
+        w_px_scaled = w_px * scale
+        h_px_scaled = h_px * scale
+
+        # Convert back to normalized for target size
+        x_c_new = x_c_px_scaled / target_w
+        y_c_new = y_c_px_scaled / target_h
+        w_new = w_px_scaled / target_w
+        h_new = h_px_scaled / target_h
+
+        # Clamp to valid range
+        x_c_new = np.clip(x_c_new, 0.0, 1.0)
+        y_c_new = np.clip(y_c_new, 0.0, 1.0)
+        w_new = np.clip(w_new, 0.001, 1.0)
+        h_new = np.clip(h_new, 0.001, 1.0)
+
+        logger.debug(
+            f"Bbox adjusted for resize: ({x_c:.4f}, {y_c:.4f}, {w:.4f}, {h:.4f}) -> "
+            f"({x_c_new:.4f}, {y_c_new:.4f}, {w_new:.4f}, {h_new:.4f})"
+        )
+
+        return (float(x_c_new), float(y_c_new), float(w_new), float(h_new))
