@@ -30,6 +30,7 @@ from .config import DataPrepConfig
 from .pylidc_config import configure_pylidc, import_pylidc
 from .data_splitter import split_patients_by_id, get_patient_split
 from .scan_processor import CTScanProcessor
+from .MONAI_scan_processor import CTScanProcessor as MonaiProcessor
 from .dataset_writer import (
     save_metadata_csv,
     save_config_json,
@@ -91,7 +92,8 @@ def _worker_process_scan(args: Tuple) -> Tuple[str, List[Dict], bool]:
             return patient_id, [], False
             
         # יצירת המעבד
-        processor = CTScanProcessor(config, directories)
+        #processor = CTScanProcessor(config, directories)
+        processor = MonaiProcessor(config, directories)
         
         # הרצה
         scan_metadata = processor.process_scan(scan, patient_split, pl_module=pl)
@@ -344,7 +346,7 @@ if __name__ == "__main__":
     # Example usage
     config_overrides = {
         #'data_path': '/path/to/LIDC-IDRI',  # REQUIRED: Set your LIDC-IDRI path
-        # 'output_dir': './my_custom_output',  # Uncomment to change output directory
+        'output_dir': r".\DetectionModel\datasets_monai",  # Uncomment to change output directory
         # 'min_diameter': 5.0,  # Uncomment to change minimum nodule diameter
         # 'debug': True,  # Uncomment for debug logging
         # 'num_workers': 4,  # Uncomment to set specific number of workers

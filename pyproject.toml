@@ -9,6 +9,7 @@ dependencies = [
     "huggingface-hub>=1.2.3",
     "keras-cv>=0.9.0",
     "matplotlib>=3.10.8",
+    "monai>=1.5.2",
     "numpy>=2.4.0",
     "opencv-python>=4.11.0.86",
     "pandas>=2.3.3",
@@ -19,6 +20,8 @@ dependencies = [
     "scipy>=1.17.0",
     "seaborn>=0.13.2",
     "tensorflow>=2.20.0",
+    "torch>=2.9.1",
+    "torchvision>=0.24.1",
     "tqdm>=4.67.1",
     "ultralytics>=8.4.7",
 ]

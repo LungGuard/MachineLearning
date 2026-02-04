@@ -19,6 +19,7 @@ __pycache__/
 datasets/
 ClassificationModel/datasets/
 DetectionModel/datasets/
+DetectionModel/datasets_monai/
 
 # Training artifacts (keep directory structure)
 logs/*

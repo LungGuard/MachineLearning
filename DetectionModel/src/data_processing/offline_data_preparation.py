@@ -74,6 +74,7 @@ from .config import DataPrepConfig
 from .pylidc_config import configure_pylidc, import_pylidc
 from .data_splitter import split_patients_by_id, get_patient_split
 from .scan_processor import CTScanProcessor
+from .MONAI_scan_processor import CTScanProcessor as MonaiCTProcessor
 from .dataset_writer import (
     save_metadata_csv,
     save_config_json,
@@ -222,7 +223,8 @@ def run_data_preparation(config: DataPrepConfig) -> Path:
     
     logger.info("[5/6] Processing scans...")
     
-    processor = CTScanProcessor(config, directories)
+    #processor = CTScanProcessor(config, directories)
+    processor = MonaiCTProcessor(config, directories)
     
     all_metadata = []
     successful = 0
@@ -302,7 +304,7 @@ if __name__ == "__main__":
     
     config_overrides = {
         #'data_path': '/path/to/LIDC-IDRI',  # REQUIRED: Set your LIDC-IDRI path
-        # 'output_dir': './my_custom_output',  # Uncomment to change output directory
+        'output_dir': r".\DetectionModel\datasets_monai",  # Uncomment to change output directory
         # 'min_diameter': 5.0,  # Uncomment to change minimum nodule diameter
         'debug': True,  # Uncomment for debug logging
     }
