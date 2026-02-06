@@ -1,5 +1,5 @@
 """
-Diagnostic Script: Identify Problematic CT Slice Images
+Diagnostic Script: Identify Problematic CT Slice Images & Nodules
 
 This script analyzes all generated images and identifies which ones are:
 1. Completely blank (uniform/no variation)
@@ -7,13 +7,7 @@ This script analyzes all generated images and identifies which ones are:
 3. Too bright/washed out (grey screen issue)
 4. Missing proper lung structure
 
-A valid lung CT slice should have:
-- Black background (air outside body)
-- Dark grey lung regions
-- Light grey/white soft tissue and bone
-- Significant pixel variation (std > threshold)
-
-Output: CSV report with problematic images and their scan info
+It also aggregates statistics per Nodule to check if complete nodules are valid.
 """
 
 import cv2
@@ -215,7 +209,7 @@ def generate_report(results: List[ImageAnalysis], output_dir: Path) -> Dict:
     # Convert to DataFrame
     df = pd.DataFrame([vars(r) for r in results])
     
-    # Summary statistics
+    # Summary statistics (Image Level)
     total_images = len(df)
     problematic_images = df[df['is_problematic']]
     num_problematic = len(problematic_images)
@@ -223,6 +217,36 @@ def generate_report(results: List[ImageAnalysis], output_dir: Path) -> Dict:
     # Group by problem type
     problem_counts = problematic_images['problem_type'].value_counts().to_dict()
     
+    # --- NODULE LEVEL ANALYSIS (Added per request) ---
+    # Group images by unique nodule (PatientID + NoduleIdx)
+    nodule_map = defaultdict(list)
+    for r in results:
+        nodule_map[(r.patient_id, r.nodule_idx)].append(r)
+    
+    total_unique_nodules = len(nodule_map)
+    perfect_nodules = 0
+    nodule_stats = []
+
+    for (pid, nidx), images in nodule_map.items():
+        total_imgs = len(images)
+        bad_imgs = sum(1 for img in images if img.is_problematic)
+        
+        # A nodule is "perfect" only if ALL its images are NOT problematic
+        is_perfect = (bad_imgs == 0)
+        if is_perfect:
+            perfect_nodules += 1
+            
+        nodule_stats.append({
+            'patient_id': pid,
+            'nodule_idx': nidx,
+            'total_images': total_imgs,
+            'bad_images': bad_imgs,
+            'is_valid': is_perfect
+        })
+        
+    nodule_validity_ratio = perfect_nodules / total_unique_nodules if total_unique_nodules > 0 else 0
+    # -------------------------------------------------
+
     # Group by patient
     problems_by_patient = problematic_images.groupby('patient_id').size().sort_values(ascending=False)
     
@@ -254,6 +278,10 @@ def generate_report(results: List[ImageAnalysis], output_dir: Path) -> Dict:
     full_csv_path = output_dir / "image_analysis_full.csv"
     df.to_csv(full_csv_path, index=False)
     
+    # Save nodule stats
+    nodule_csv_path = output_dir / "nodule_analysis.csv"
+    pd.DataFrame(nodule_stats).to_csv(nodule_csv_path, index=False)
+    
     # Save only problematic images
     problematic_csv_path = output_dir / "problematic_images.csv"
     problematic_images.to_csv(problematic_csv_path, index=False)
@@ -268,11 +296,18 @@ def generate_report(results: List[ImageAnalysis], output_dir: Path) -> Dict:
         "problematic_images": num_problematic,
         "problematic_ratio": round(num_problematic / total_images, 4) if total_images > 0 else 0,
         "problem_counts": problem_counts,
+        # Nodule stats added to summary
+        "nodule_stats": {
+            "total_nodules": total_unique_nodules,
+            "perfect_nodules": perfect_nodules,
+            "validity_ratio": round(nodule_validity_ratio, 4)
+        },
         "split_stats": split_stats,
         "patients_all_problematic": all_problematic_patients,
         "patients_some_problematic": some_problematic_patients,
         "output_files": {
             "full_analysis": str(full_csv_path),
+            "nodule_analysis": str(nodule_csv_path),
             "problematic_only": str(problematic_csv_path),
             "patient_summary": str(patient_summary_path)
         }
@@ -287,36 +322,45 @@ def print_summary(summary: Dict):
     print("IMAGE QUALITY ANALYSIS REPORT")
     print("=" * 70)
     
-    print(f"\n📊 OVERALL STATISTICS:")
-    print(f"   Total images analyzed: {summary['total_images']}")
-    print(f"   Problematic images: {summary['problematic_images']} ({summary['problematic_ratio']:.1%})")
+    print(f"\n📊 OVERALL STATISTICS (IMAGES):")
+    print(f"  Total images analyzed: {summary['total_images']}")
+    print(f"  Problematic images: {summary['problematic_images']} ({summary['problematic_ratio']:.1%})")
     
+    # --- NEW NODULE SECTION ---
+    if 'nodule_stats' in summary:
+        ns = summary['nodule_stats']
+        print(f"\n🦠 NODULE ANALYSIS (MEDICAL ENTITIES):")
+        print(f"  Total Unique Nodules:  {ns['total_nodules']}")
+        print(f"  Perfect Nodules:       {ns['perfect_nodules']} (All slices valid)")
+        print(f"  Nodule Validity Rate:  {ns['validity_ratio']:.1%}")
+    # --------------------------
+
     # Per-split statistics
     if summary.get('split_stats'):
         print(f"\n📈 PER-SPLIT BREAKDOWN:")
         for split_name in sorted(summary['split_stats'].keys()):
             stats = summary['split_stats'][split_name]
-            print(f"   {split_name.capitalize():5s}: {stats['problematic']:4d}/{stats['total']:4d} problematic ({stats['ratio']:.1%})")
+            print(f"  {split_name.capitalize():5s}: {stats['problematic']:4d}/{stats['total']:4d} problematic ({stats['ratio']:.1%})")
     
     print(f"\n🔴 PROBLEM BREAKDOWN:")
     for problem_type, count in summary['problem_counts'].items():
-        print(f"   {problem_type}: {count}")
+        print(f"  {problem_type}: {count}")
     
     print(f"\n👤 PATIENT ANALYSIS:")
     all_prob = summary['patients_all_problematic']
     some_prob = summary['patients_some_problematic']
     
-    print(f"   Patients with ALL images problematic: {len(all_prob)}")
+    print(f"  Patients with ALL images problematic: {len(all_prob)}")
     if all_prob:
         print(f"      Examples: {all_prob[:10]}{'...' if len(all_prob) > 10 else ''}")
     
-    print(f"   Patients with SOME images problematic: {len(some_prob)}")
+    print(f"  Patients with SOME images problematic: {len(some_prob)}")
     if some_prob:
         print(f"      Examples: {some_prob[:10]}{'...' if len(some_prob) > 10 else ''}")
     
     print(f"\n📁 OUTPUT FILES:")
     for name, path in summary['output_files'].items():
-        print(f"   {name}: {path}")
+        print(f"  {name}: {path}")
     
     print("\n" + "=" * 70)
     
@@ -324,19 +368,19 @@ def print_summary(summary: Dict):
     print("\n🔍 DIAGNOSIS:")
     
     if len(all_prob) > 0 and len(some_prob) == 0:
-        print("   → ALL problematic images come from specific patients")
-        print("   → This suggests a SCAN-LEVEL issue (offset, corrupted data)")
-        print("   → Check these patients' raw DICOM data")
+        print("  → ALL problematic images come from specific patients")
+        print("  → This suggests a SCAN-LEVEL issue (offset, corrupted data)")
+        print("  → Check these patients' raw DICOM data")
     
     elif len(some_prob) > len(all_prob):
-        print("   → Problems occur randomly across patients")
-        print("   → This suggests a SLICE-LEVEL issue (coordinate transform, slice selection)")
-        print("   → Check the slice index calculation logic")
+        print("  → Problems occur randomly across patients")
+        print("  → This suggests a SLICE-LEVEL issue (coordinate transform, slice selection)")
+        print("  → Check the slice index calculation logic")
     
     elif summary['problematic_ratio'] > 0.5:
-        print("   → More than half of images are problematic")
-        print("   → This suggests a PIPELINE-WIDE issue (windowing, preprocessing)")
-        print("   → Check the volume preprocessing steps")
+        print("  → More than half of images are problematic")
+        print("  → This suggests a PIPELINE-WIDE issue (windowing, preprocessing)")
+        print("  → Check the volume preprocessing steps")
     
     print("=" * 70 + "\n")
 
@@ -368,7 +412,7 @@ def main(dataset_dir: str, output_dir: str = None):
             
             # Add split info
             for r in results:
-                r.split = split
+                r.split = split  # Monkey patch split info
             
             all_results.extend(results)
             

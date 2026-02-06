@@ -8,8 +8,8 @@ from typing import Tuple
 class DataPrepConfig:
     """Pipeline configuration parameters."""
     
-    data_path: str = "E:\FinalsProject\Datasets\CancerDetection\images\manifest-1600709154662\LIDC-IDRI"
-    output_dir: str = "./lungguard_dataset"
+    data_path: str = r"E:\FinalsProject\Datasets\CancerDetection\images\manifest-1600709154662\LIDC-IDRI"
+    output_dir: str = r"./lungguard_dataset"
     
     train_ratio: float = 0.70
     val_ratio: float = 0.15
@@ -25,7 +25,8 @@ class DataPrepConfig:
 
     # Output image size for YOLO (all images will be resized to this)
     output_image_size: Tuple[int, int] = (512, 512)  # (height, width)
-    preserve_aspect_ratio: bool = True  # Preserve aspect ratio with black padding
+    use_center_crop: bool = True  # True = center crop (fills frame), False = padding (black bars)
+    max_scale: float = 1.2  # Maximum zoom factor for center crop (1.2 = 20% max zoom)
 
     min_nodule_diameter: float = 3.0  # mm
     max_nodule_diameter: float = 100.0  #mm

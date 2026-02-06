@@ -165,18 +165,18 @@ class CTScanProcessor:
         patient_id: str,
         split: str
     ) -> Optional[Dict]:
-        """Process single slice: create 2.5D image, compute bbox, save, generate metadata."""
+        """Process single slice: create 2.5D image, compute bbox, center crop, save, generate metadata."""
         try:
-            # Get target size from config (default to None for backwards compatibility)
-            target_size = getattr(self.config, 'output_image_size', None)
-            preserve_aspect = getattr(self.config, 'preserve_aspect_ratio', True)
+            # Get target size from config
+            target_size = getattr(self.config, 'output_image_size', (512, 512))
+            use_center_crop = getattr(self.config, 'use_center_crop', True)
 
-            # Create 2.5D image with optional resizing
-            image_25d = VolumePreprocessor.create_25d_sandwich(
+            # Create 2.5D image with center crop (returns image and crop_info)
+            image_25d, crop_info = VolumePreprocessor.create_25d_sandwich(
                 windowed,
                 slice_idx,
                 target_size=target_size,
-                preserve_aspect_ratio=preserve_aspect
+                use_center_crop=use_center_crop
             )
             self.logger.debug(
                 f"[{patient_id}] Slice {slice_idx}: image shape={image_25d.shape}, "
@@ -197,15 +197,33 @@ class CTScanProcessor:
                 self.config.bbox_padding_factor
             )
 
-            # Adjust bbox for resize if target_size is specified
+            # Adjust bbox for center crop or padding
             if target_size is not None and bbox is not None:
                 original_size = (volume_shape[1], volume_shape[2])  # (height, width)
-                bbox = BoundingBoxConverter.adjust_bbox_for_resize(
-                    bbox,
-                    original_size,
-                    target_size,
-                    preserve_aspect_ratio=preserve_aspect
-                )
+
+                if crop_info is not None:
+                    # Center crop was used
+                    scale, crop_offset = crop_info
+                    bbox = BoundingBoxConverter.adjust_bbox_for_center_crop(
+                        bbox,
+                        original_size,
+                        target_size,
+                        scale,
+                        crop_offset
+                    )
+                    if bbox is None:
+                        self.logger.debug(
+                            f"[{patient_id}] Slice {slice_idx}: nodule center cropped out of frame"
+                        )
+                        return None
+                else:
+                    # Padding was used
+                    bbox = BoundingBoxConverter.adjust_bbox_for_resize(
+                        bbox,
+                        original_size,
+                        target_size,
+                        preserve_aspect_ratio=True
+                    )
 
             self.logger.debug(f"[{patient_id}] Slice {slice_idx}: bbox={bbox}")
             

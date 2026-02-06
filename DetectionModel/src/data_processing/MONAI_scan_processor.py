@@ -95,7 +95,12 @@ class CTScanProcessor:
             # 3. Convert to PyTorch Tensor (Channel First: 1, D, H, W)
             volume_t = torch.from_numpy(volume_np).float().unsqueeze(0)
 
-            # 4. SPATIAL RESAMPLING using MONAI Zoom
+            # 4. CRITICAL: Clamp intensity BEFORE interpolation
+            # This ensures padding values don't get interpolated during Zoom
+            # Equivalent to MONAI's ClampIntensity but without import issues
+            volume_t = torch.clamp(volume_t, min=-1000.0, max=3000.0)
+
+            # 5. SPATIAL RESAMPLING using MONAI Zoom
             zoom_factors = [
                 orig / target
                 for orig, target in zip(original_spacing, self.config.target_spacing)
@@ -109,7 +114,7 @@ class CTScanProcessor:
             )
             vol_resampled = zoomer(volume_t)
 
-            # 5. LUNG WINDOWING using MONAI ScaleIntensityRange
+            # 6. LUNG WINDOWING using MONAI ScaleIntensityRange
             # Lung window: center=-600, width=1500 -> range [-1350, +150]
             window_center = getattr(self.config, 'window_center', -600.0)
             window_width = getattr(self.config, 'window_width', 1500.0)
@@ -125,7 +130,7 @@ class CTScanProcessor:
             )
             vol_windowed = scaler(vol_resampled)
 
-            # 6. Convert back to Numpy
+            # 7. Convert back to Numpy
             final_volume = vol_windowed[0].numpy()
 
             self.logger.debug(
@@ -222,18 +227,20 @@ class CTScanProcessor:
         return list(filter(is_valid_nodule, nodule_features))
 
     def process_single_slice(self, slice_idx, nodule_idx, centroid, features, windowed, volume_shape, patient_id, split):
-        """Process single slice: create 2.5D image, compute bbox, resize, save, generate metadata."""
+        """Process single slice: create 2.5D image, compute bbox, center crop, save, generate metadata."""
         try:
-            # Get target size from config (default to None for backwards compatibility)
-            target_size = getattr(self.config, 'output_image_size', None)
-            preserve_aspect = getattr(self.config, 'preserve_aspect_ratio', True)
+            # Get target size from config
+            target_size = getattr(self.config, 'output_image_size', (512, 512))
+            use_center_crop = getattr(self.config, 'use_center_crop', True)
+            max_scale = getattr(self.config, 'max_scale', 1.2)
 
-            # Create 2.5D image with optional resizing
-            image_25d = VolumePreprocessor.create_25d_sandwich(
+            # Create 2.5D image with center crop (returns image and crop_info)
+            image_25d, crop_info = VolumePreprocessor.create_25d_sandwich(
                 windowed,
                 slice_idx,
                 target_size=target_size,
-                preserve_aspect_ratio=preserve_aspect
+                use_center_crop=use_center_crop,
+                max_scale=max_scale
             )
 
             if image_25d is None or image_25d.size == 0:
@@ -251,15 +258,34 @@ class CTScanProcessor:
             if bbox is None:
                 return None
 
-            # Adjust bbox for resize if target_size is specified
+            # Adjust bbox for center crop or padding
             if target_size is not None:
                 original_size = (volume_shape[1], volume_shape[2])  # (height, width)
-                bbox = BoundingBoxConverter.adjust_bbox_for_resize(
-                    bbox,
-                    original_size,
-                    target_size,
-                    preserve_aspect_ratio=preserve_aspect
-                )
+
+                if crop_info is not None:
+                    # Center crop was used - adjust bbox accordingly
+                    scale, crop_offset = crop_info
+                    bbox = BoundingBoxConverter.adjust_bbox_for_center_crop(
+                        bbox,
+                        original_size,
+                        target_size,
+                        scale,
+                        crop_offset
+                    )
+                    # If bbox is None, nodule was cropped out of frame
+                    if bbox is None:
+                        self.logger.debug(
+                            f"[{patient_id}] Slice {slice_idx}: nodule center cropped out of frame"
+                        )
+                        return None
+                else:
+                    # Padding was used
+                    bbox = BoundingBoxConverter.adjust_bbox_for_resize(
+                        bbox,
+                        original_size,
+                        target_size,
+                        preserve_aspect_ratio=True
+                    )
 
             filename = f"{patient_id}_n{nodule_idx:02d}_z{slice_idx:04d}"
             image_dir = self.directories[f'{split}_images']

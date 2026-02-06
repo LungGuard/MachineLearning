@@ -155,3 +155,80 @@ class BoundingBoxConverter:
         )
 
         return (float(x_c_new), float(y_c_new), float(w_new), float(h_new))
+
+    @staticmethod
+    def adjust_bbox_for_center_crop(
+        original_bbox: Tuple[float, float, float, float],
+        original_size: Tuple[int, int],
+        target_size: Tuple[int, int],
+        scale: float,
+        crop_offset: Tuple[int, int]
+    ) -> Optional[Tuple[float, float, float, float]]:
+        """
+        Adjust YOLO bbox coordinates for center crop/pad transformation.
+
+        Handles both cases:
+        - Positive offset: image was cropped (content removed from edges)
+        - Negative offset: image was padded (black borders added)
+
+        Args:
+            original_bbox: (x_center, y_center, width, height) in normalized [0, 1] coordinates
+            original_size: (height, width) of original image
+            target_size: (height, width) of target image
+            scale: the scale factor that was applied during resize
+            crop_offset: (y_offset, x_offset) - positive if cropped, negative if padded
+
+        Returns:
+            Adjusted bbox (x_center, y_center, width, height) in normalized coordinates,
+            or None if the bbox center is outside the visible region.
+        """
+        x_c, y_c, w, h = original_bbox
+        orig_h, orig_w = original_size
+        target_h, target_w = target_size
+        y_off, x_off = crop_offset
+
+        # Convert from normalized original to pixel coordinates in original image
+        x_c_px = x_c * orig_w
+        y_c_px = y_c * orig_h
+        w_px = w * orig_w
+        h_px = h * orig_h
+
+        # Apply scale (to resized image coordinates)
+        x_c_scaled = x_c_px * scale
+        y_c_scaled = y_c_px * scale
+        w_scaled = w_px * scale
+        h_scaled = h_px * scale
+
+        # Apply offset transformation
+        # Positive offset = cropped (subtract from scaled coords)
+        # Negative offset = padded (add absolute value, which is same as subtracting negative)
+        x_c_final = x_c_scaled - x_off
+        y_c_final = y_c_scaled - y_off
+
+        # Check if bbox center is within visible region (0 to target_size)
+        if x_c_final < 0 or x_c_final > target_w or y_c_final < 0 or y_c_final > target_h:
+            logger.debug(
+                f"Bbox center ({x_c_final:.1f}, {y_c_final:.1f}) outside visible region "
+                f"(0-{target_w}, 0-{target_h})"
+            )
+            return None  # Nodule center is outside visible region
+
+        # Normalize to target size
+        x_c_new = x_c_final / target_w
+        y_c_new = y_c_final / target_h
+        w_new = w_scaled / target_w
+        h_new = h_scaled / target_h
+
+        # Clamp to valid range
+        x_c_new = np.clip(x_c_new, 0.0, 1.0)
+        y_c_new = np.clip(y_c_new, 0.0, 1.0)
+        w_new = np.clip(w_new, 0.001, 1.0)
+        h_new = np.clip(h_new, 0.001, 1.0)
+
+        logger.debug(
+            f"Bbox adjusted: ({x_c:.4f}, {y_c:.4f}, {w:.4f}, {h:.4f}) -> "
+            f"({x_c_new:.4f}, {y_c_new:.4f}, {w_new:.4f}, {h_new:.4f}) "
+            f"[scale={scale:.3f}, offset=({y_off}, {x_off})]"
+        )
+
+        return (float(x_c_new), float(y_c_new), float(w_new), float(h_new))
