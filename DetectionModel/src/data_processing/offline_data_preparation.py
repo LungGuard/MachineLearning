@@ -1,84 +1,53 @@
-"""Offline data preparation pipeline."""
+"""
+Unified Data Preparation Pipeline.
+Contains the shared logic for both Serial and Parallel processing.
+"""
 
 import os
 import sys
 import logging
-import configparser
 import json
+import shutil
+import pandas as pd
 from pathlib import Path
 from typing import Dict, List, Tuple
-import numpy as np
-import pandas as pd
-import shutil
-
-configparser.SafeConfigParser = configparser.ConfigParser
-np.int = np.int64
-np.float = np.float64
-np.bool = np.bool_
-np.object = np.object_
-np.str = np.str_
-
-logger = logging.getLogger(__name__)
-
-
-DEFAULT_CONFIG = {
-    'data_path': r"E:\FinalsProject\Datasets\CancerDetection\images\manifest-1600709154662\LIDC-IDRI",
-    'output_dir': r".\DetectionModel\datasets",
-    'train_ratio': 0.70,
-    'val_ratio': 0.15,
-    'test_ratio': 0.15,
-    'min_diameter': 3.0,
-    'max_diameter': 100.0,
-    'slices_per_nodule': 3,
-    'seed': 42,
-    'debug': False,
-    'log_freq': 5
-}
-
-
-def setup_logging(debug: bool = False) -> None:
-    log_level = logging.DEBUG if debug else logging.INFO
-    root_logger = logging.getLogger()
-    root_logger.handlers.clear()
-    root_logger.setLevel(log_level)
-
-    log_format = (
-        '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-        if debug
-        else '%(asctime)s - %(message)s'
-    )
-    formatter = logging.Formatter(log_format, datefmt='%H:%M:%S')
-
-    console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setLevel(log_level)
-    console_handler.setFormatter(formatter)
-
-    file_handler = logging.FileHandler('data_preparation.log', mode='w')
-    file_handler.setLevel(log_level)
-    file_handler.setFormatter(formatter)
-
-    root_logger.addHandler(console_handler)
-    root_logger.addHandler(file_handler)
-
-    logging.getLogger('pylidc').setLevel(logging.WARNING)
-    logging.getLogger('PIL').setLevel(logging.WARNING)
-    logging.getLogger('matplotlib').setLevel(logging.WARNING)
 
 from .config import DataPrepConfig
 from .pylidc_config import configure_pylidc, import_pylidc
 from .data_splitter import split_patients_by_id, get_patient_split
-from .MONAI_scan_processor import CTScanProcessor as MonaiCTProcessor
+from .MONAI_scan_processor import CTScanProcessor as MonaiProcessor
 from .dataset_writer import (
     save_metadata_csv,
     save_config_json,
     save_yolo_yaml,
     log_summary_statistics
 )
+from .diagnose_dataset import DatasetDiagnoser
+
+
+logger = logging.getLogger(__name__)
+
+def setup_logging(debug: bool = False) -> None:
+    """Configures global logging settings."""
+    log_level = logging.DEBUG if debug else logging.INFO
+    root_logger = logging.getLogger()
+    root_logger.handlers.clear()
+    root_logger.setLevel(log_level)
+
+    formatter = logging.Formatter('%(asctime)s - %(message)s', datefmt='%H:%M:%S')
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setLevel(log_level)
+    console_handler.setFormatter(formatter)
+    root_logger.addHandler(console_handler)
+    
+    logging.getLogger('pylidc').setLevel(logging.WARNING)
+    logging.getLogger('PIL').setLevel(logging.WARNING)
+    logging.getLogger('matplotlib').setLevel(logging.WARNING)
 
 
 def create_directory_structure(output_dir: str) -> Dict[str, Path]:
+    """Creates the YOLO directory structure."""
     base_path = Path(output_dir)
-
     directories = {
         'train_images': base_path / 'train' / 'images',
         'train_labels': base_path / 'train' / 'labels',
@@ -90,200 +59,190 @@ def create_directory_structure(output_dir: str) -> Dict[str, Path]:
     }
 
     for name, path in directories.items():
-        cleanup_needed = name != 'metadata'
-
-        path_exists = path.exists()
-        should_remove = cleanup_needed and path_exists
-        shutil.rmtree(path) if should_remove else None
-
-        is_metadata = name == 'metadata'
-        should_clean_files = is_metadata and path_exists
-
-        if should_clean_files:
-            for file_path in path.iterdir():
-                is_file = file_path.is_file()
-                is_patient_splits = file_path.name.startswith("patient_splits")
-                should_delete = is_file and not is_patient_splits
-                file_path.unlink() if should_delete else None
-
+        if path.exists() and name != 'metadata':
+            shutil.rmtree(path)
         path.mkdir(parents=True, exist_ok=True)
-
-    logger.info(f"Output directory: {base_path}")
+        if name == 'metadata':
+            for f in path.iterdir():
+                if f.is_file() and not f.name.startswith("patient_splits"):
+                    f.unlink()
     return directories
 
 
-def filter_scans_with_nodules(all_scans: List, pylidc) -> List[Tuple]:
+def filter_scans_with_nodules(all_scans: List, pylidc_module) -> List[Tuple]:
+    """Filters scans that actually contain clustered annotations."""
     total = len(all_scans)
-    logger.info(f"Filtering {total} scans for nodule annotations...")
-
+    logger.info(f"Filtering {total} scans for nodules...")
     scans_with_nodules = []
 
     for idx, scan in enumerate(all_scans):
-        show_progress = (idx + 1) % 100 == 0 or idx == total - 1
-        logger.info(f"  Checking scan {idx + 1}/{total}...") if show_progress else None
-
         try:
-            annotations = scan.cluster_annotations()
-            has_nodules = len(annotations) > 0
-            scans_with_nodules.append((scan, annotations)) if has_nodules else None
-        except Exception as e:
-            logger.debug(f"Error checking {scan.patient_id}: {e}")
+            if len(scan.cluster_annotations()) > 0:
+                scans_with_nodules.append((scan, scan.cluster_annotations()))
+        except Exception:
+            pass
+        if (idx + 1) % 100 == 0:
+            logger.info(f" Checked {idx + 1}/{total} scans...")
 
-    logger.info(f"Found {len(scans_with_nodules)} scans with nodules")
+    logger.info(f"Found {len(scans_with_nodules)} scans with valid nodules.")
     return scans_with_nodules
 
 
-def run_data_preparation(config: DataPrepConfig) -> Path:
-    logger.info("=" * 50)
-    logger.info("LungGuard Data Preparation Pipeline")
-    logger.info("=" * 50)
+class DataPreparationPipeline:
+    """
+    Base class that handles the setup, configuration, processing (serial), and interactive cleanup.
+    """
+    
+    def __init__(self, config: DataPrepConfig):
+        self.config = config
+        self.pylidc = None
+        self.directories = {}
+        self.scans_to_process = []
+        self.splits = {}
 
-    logger.info("[1/6] Configuring PyLIDC...")
-    configure_pylidc(config.data_path)
-    pylidc = import_pylidc()
+    def setup(self):
+        """Runs the initialization steps."""
+        logger.info("=" * 50)
+        logger.info("LungGuard Data Preparation Pipeline Setup")
+        logger.info("=" * 50)
 
-    logger.info("[2/6] Creating directories...")
-    directories = create_directory_structure(config.output_dir)
+        logger.info("[1/4] Configuring PyLIDC...")
+        configure_pylidc(self.config.data_path)
+        self.pylidc = import_pylidc()
 
-    splits_json_path = directories['metadata'] / 'patient_splits.json'
+        logger.info("[2/4] Creating directories...")
+        self.directories = create_directory_structure(self.config.output_dir)
 
-    if splits_json_path.exists():
-        logger.info("[3/6] Loading existing patient splits...")
-        with open(splits_json_path, 'r') as f:
-            patient_splits_dict = json.load(f)
+        self._prepare_splits_and_scans()
 
-        patient_ids = list(patient_splits_dict.keys())
-        logger.info(f"Loaded {len(patient_ids)} patients from existing splits")
+    def _prepare_splits_and_scans(self):
+        splits_json_path = self.directories['metadata'] / 'patient_splits.json'
+        
+        if splits_json_path.exists():
+            logger.info("[3/4] Loading existing patient splits...")
+            with open(splits_json_path, 'r') as f:
+                patient_splits_dict = json.load(f)
+            
+            self.splits = {'train': [], 'val': [], 'test': []}
+            for pid, split in patient_splits_dict.items():
+                self.splits[split].append(pid)
+                
+            patient_ids = list(patient_splits_dict.keys())
+            logger.info(f"Querying scans for {len(patient_ids)} existing patients...")
+            
+            for pid in patient_ids:
+                try:
+                    scans = self.pylidc.query(self.pylidc.Scan).filter(self.pylidc.Scan.patient_id == pid).all()
+                    for s in scans:
+                        if len(s.cluster_annotations()) > 0:
+                            self.scans_to_process.append((s, s.cluster_annotations()))
+                except: pass
+        else:
+            logger.info("[3/4] Querying full database and creating new splits...")
+            all_scans = self.pylidc.query(self.pylidc.Scan).all()
+            self.scans_to_process = filter_scans_with_nodules(all_scans, self.pylidc)
+            
+            if not self.scans_to_process:
+                raise ValueError("No valid scans found in database!")
 
-        logger.info("[4/6] Querying scans for existing patients...")
-        scans_with_annotations = []
-        for patient_id in patient_ids:
+            patient_ids = list(set(s.patient_id for s, _ in self.scans_to_process))
+            self.splits = split_patients_by_id(
+                patient_ids, self.config.train_ratio, self.config.val_ratio, 
+                self.config.test_ratio, self.config.random_seed
+            )
+            
+            patient_splits_dict = {}
+            for pid in patient_ids:
+                patient_splits_dict[pid] = get_patient_split(pid, self.splits)
+            
+            with open(splits_json_path, 'w') as f:
+                json.dump(patient_splits_dict, f, indent=2, sort_keys=True)
+
+        logger.info(f"Ready to process {len(self.scans_to_process)} scans.")
+
+    def finalize(self, all_metadata: List[Dict], extra_config_info: Dict = None) -> Path:
+        """Saves CSV, JSON, YAML and logs stats."""
+        logger.info("[Finalizing] Saving outputs...")
+        csv_path = self.directories['metadata'] / 'regression_dataset.csv'
+        metadata_df = save_metadata_csv(all_metadata, csv_path)
+        config_path = self.directories['metadata'] / 'preparation_config.json'
+        config_dict_full = save_config_json(self.config, config_path, metadata_df)
+        if extra_config_info:
+            config_dict_full.update(extra_config_info)
+        yaml_path = save_yolo_yaml(self.config.output_dir, metadata_df)
+        log_summary_statistics(metadata_df, config_dict_full, csv_path, config_path, yaml_path)
+        return csv_path
+
+    def run_serial(self) -> Path:
+        """Runs serial processing and then triggers interactive cleanup."""
+        self.setup()
+        processor = MonaiProcessor(self.config, self.directories)
+        all_metadata = []
+        logger.info(f"Starting Serial Processing of {len(self.scans_to_process)} scans...")
+        
+        for idx, (scan, _) in enumerate(self.scans_to_process):
+            split = get_patient_split(scan.patient_id, self.splits)
+            if (idx + 1) % self.config.log_freq == 0:
+                logger.info(f"Processing {idx+1}/{len(self.scans_to_process)}: {scan.patient_id}")
             try:
-                patient_scans = pylidc.query(pylidc.Scan).filter(pylidc.Scan.patient_id == patient_id).all()
-                for scan in patient_scans:
-                    annotations = scan.cluster_annotations()
-                    if len(annotations) > 0:
-                        scans_with_annotations.append((scan, annotations))
+                meta = processor.process_scan(scan, split, pl_module=self.pylidc)
+                all_metadata.extend(meta)
             except Exception as e:
-                logger.debug(f"Error querying {patient_id}: {e}")
+                logger.error(f"Error processing {scan.patient_id}: {e}")
 
-        logger.info(f"Found {len(scans_with_annotations)} scans with nodules")
+        csv_path = self.finalize(all_metadata, {"mode": "serial"})
+        
+        # Trigger Interactive Cleanup at the end
+        self.interactive_cleanup()
+        
+        return csv_path
 
-        splits = {'train': [], 'val': [], 'test': []}
-        for patient_id, split in patient_splits_dict.items():
-            splits[split].append(patient_id)
+    def interactive_cleanup(self):
+        """
+        Runs diagnosis and offers the user to save reports or export a clean dataset.
+        """
+        logger.info("\n" + "="*60)
+        logger.info("POST-PROCESSING: DATASET DIAGNOSIS & CLEANUP")
+        logger.info("="*60)
+        
+        diagnoser = DatasetDiagnoser(self.config.output_dir)
+        logger.info("Running analysis on generated images... Please wait.")
+        diagnoser.analyze()
+        
+        summary = diagnoser.get_summary_report()
+        print(f"\nAnalysis Complete.")
+        print(f"Total Images: {summary['total_images']}")
+        print(f"Problematic Images: {summary['problematic_count']} ({summary['problematic_ratio']:.1%})")
 
-    else:
-        logger.info("[3/6] Querying LIDC database...")
-        all_scans = pylidc.query(pylidc.Scan).all()
-        logger.info(f"Total scans found: {len(all_scans)}")
+        print("\n" + "-"*30)
+        save_ans = input(">> Do you want to save detailed analysis CSV reports? (y/n): ").strip().lower()
+        if save_ans == 'y':
+            diagnoser.save_reports_to_disk()
+            print("Reports saved.")
 
-        scans_with_annotations = filter_scans_with_nodules(all_scans, pylidc)
-
-        if len(scans_with_annotations) == 0:
-            logger.error("No scans with nodule annotations found!")
-            csv_path = directories['metadata'] / 'regression_dataset.csv'
-            pd.DataFrame().to_csv(csv_path, index=False)
-            return csv_path
-
-        logger.info("[4/6] Splitting patients...")
-        patient_ids = list(set(scan.patient_id for scan, _ in scans_with_annotations))
-        logger.info(f"Unique patients: {len(patient_ids)}")
-
-        splits = split_patients_by_id(
-            patient_ids,
-            config.train_ratio,
-            config.val_ratio,
-            config.test_ratio,
-            config.random_seed
-        )
-
-        patient_splits_dict = {}
-        for patient_id in patient_ids:
-            split = get_patient_split(patient_id, splits)
-            patient_splits_dict[patient_id] = split
-
-        with open(splits_json_path, 'w') as f:
-            json.dump(patient_splits_dict, f, indent=2, sort_keys=True)
-        logger.info(f"Patient splits saved to: {splits_json_path}")
-
-    logger.info("[5/6] Processing scans...")
-
-    processor = MonaiCTProcessor(config, directories)
-
-    all_metadata = []
-    successful = 0
-    failed = 0
-    total_scans = len(scans_with_annotations)
-
-    for idx, (scan, annotations) in enumerate(scans_with_annotations):
-        patient_id = scan.patient_id
-        split = get_patient_split(patient_id, splits)
-
-        show_progress = (idx + 1) % config.log_freq == 0 or idx == 0 or idx == total_scans - 1
-        logger.info(f"  [{idx + 1}/{total_scans}] {patient_id} ({split})") if show_progress else None
-
-        try:
-            scan_metadata = processor.process_scan(scan, split, pylidc)
-
-            samples_generated = len(scan_metadata)
-            all_metadata.extend(scan_metadata) if samples_generated > 0 else None
-            successful += 1 if samples_generated > 0 else 0
-            failed += 1 if samples_generated == 0 else 0
-
-        except Exception as e:
-            failed += 1
-            logger.error(f"  [{patient_id}] Error: {e}")
-            logger.debug(f"Traceback:", exc_info=True)
-
-    logger.info(f"Processing complete: {successful} OK, {failed} failed")
-    logger.info(f"Total samples: {len(all_metadata)}")
-
-    logger.info("[6/6] Saving outputs...")
-    csv_path = directories['metadata'] / 'regression_dataset.csv'
-    metadata_df = save_metadata_csv(all_metadata, csv_path)
-
-    config_path = directories['metadata'] / 'preparation_config.json'
-    config_dict = save_config_json(config, config_path, metadata_df)
-
-    yaml_path = save_yolo_yaml(config.output_dir, metadata_df)
-
-    log_summary_statistics(metadata_df, config_dict, csv_path, config_path, yaml_path)
-
-    return csv_path
-
-
-def main(config_overrides: Dict = None):
-    config_values = DEFAULT_CONFIG.copy()
-    if config_overrides:
-        config_values.update(config_overrides)
-
-    setup_logging(debug=config_values['debug'])
-
-    if config_values['debug']:
-        logger.debug(f"Configuration: {config_values}")
-
-    config = DataPrepConfig(
-        data_path=config_values['data_path'],
-        output_dir=config_values['output_dir'],
-        train_ratio=config_values['train_ratio'],
-        val_ratio=config_values['val_ratio'],
-        test_ratio=config_values['test_ratio'],
-        min_nodule_diameter=config_values['min_diameter'],
-        max_nodule_diameter=config_values['max_diameter'],
-        slices_per_nodule=config_values['slices_per_nodule'],
-        random_seed=config_values['seed'],
-        log_freq=config_values['log_freq']
-    )
-
-    csv_path = run_data_preparation(config)
-    return csv_path
-
-
-if __name__ == "__main__":
-    config_overrides = {
-        'output_dir': r".\DetectionModel\datasets_monai",
-        'debug': True,
-    }
-
-    result_path = main(config_overrides)
+        # 3. Ask to Export/Clean Dataset
+        print("\n" + "-"*30)
+        print("Clean Dataset Export Options:")
+        print("1. Create NEW clean dataset (Copy valid files to a new folder)")
+        print("2. Clean IN-PLACE (DELETE invalid files from current folder)")
+        print("3. Skip")
+        
+        choice = input(">> Select an option (1/2/3): ").strip()
+        
+        if choice == '1':
+            new_dir_name = input(">> Enter name/path for the new dataset folder: ").strip()
+            if new_dir_name:
+                # Ensure it's a full path or relative to current dir
+                new_path = Path(new_dir_name).resolve()
+                print(f"Exporting clean dataset to: {new_path} ...")
+                diagnoser.export_clean_dataset(output_dir=str(new_path), overwrite_existing=False)
+        
+        elif choice == '2':
+            confirm = input(">> WARNING: This will PERMANENTLY DELETE bad files. Type 'yes' to confirm: ").strip()
+            if confirm == 'yes':
+                print("Cleaning dataset in-place...")
+                diagnoser.export_clean_dataset(overwrite_existing=True)
+            else:
+                print("Operation cancelled.")
+        
+        print("\nPipeline execution finished.")

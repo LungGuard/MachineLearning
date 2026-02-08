@@ -2,10 +2,11 @@ import cv2
 import numpy as np
 import pandas as pd
 from pathlib import Path
-from typing import Dict, List, Tuple, Optional, Set
+from typing import Dict, List, Tuple, Optional, Set, Union
 from dataclasses import dataclass, field
 import re
 import logging
+import shutil
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -52,7 +53,7 @@ class ImageAnalysisResult:
 
 class DatasetDiagnoser:
     """
-    Analyzes image quality in datasets and provides filtering capabilities.
+    Analyzes image quality in datasets and provides filtering/cleaning capabilities.
     """
     
     def __init__(self, dataset_dir: str, thresholds: AnalysisThresholds = AnalysisThresholds()):
@@ -131,112 +132,188 @@ class DatasetDiagnoser:
         return summary
 
     def save_reports_to_disk(self, output_dir: str = None) -> None:
-        """Saves all analysis dataframes to CSV files."""
+        """Saves all analysis dataframes (Full, Nodule, Patient, Summary) to CSV files."""
         save_path = Path(output_dir) if output_dir else self.dataset_dir / "analysis"
         save_path.mkdir(parents=True, exist_ok=True)
 
         logger.info(f"Saving analysis reports to {save_path}...")
         
-        self.get_results_dataframe().to_csv(save_path / "image_analysis_full.csv", index=False)
+        df = self.get_results_dataframe()
+        if df.empty:
+            logger.warning("No results to save.")
+            return
+
+        # 1. Full Image Analysis
+        df.to_csv(save_path / "image_analysis_full.csv", index=False)
+        
+        # 2. Problematic Only
         self.get_problematic_images().to_csv(save_path / "problematic_images.csv", index=False)
         
-        # Save summary text
+        # --- NEW: Nodule Analysis (Aggregation) ---
+        # Group by Patient + NoduleIdx
+        if 'nodule_idx' in df.columns:
+            nodule_stats = df.groupby(['patient_id', 'nodule_idx']).agg(
+                total_images=('is_problematic', 'count'),
+                bad_images=('is_problematic', 'sum')
+            ).reset_index()
+            
+            # A nodule is valid ONLY if it has 0 bad images
+            nodule_stats['is_valid'] = nodule_stats['bad_images'] == 0
+            nodule_stats.to_csv(save_path / "nodule_analysis.csv", index=False)
+        
+        # --- NEW: Patient Summary (Aggregation) ---
+        if 'patient_id' in df.columns:
+            patient_stats = df.groupby('patient_id').agg(
+                problematic_count=('is_problematic', 'sum'),
+                total_count=('is_problematic', 'count')
+            ).reset_index()
+            
+            patient_stats['problematic_ratio'] = patient_stats['problematic_count'] / patient_stats['total_count']
+            patient_stats.to_csv(save_path / "patient_summary.csv", index=False)
+
+        # 5. Text Summary
         summary = self.get_summary_report()
         with open(save_path / "summary_report.txt", "w") as f:
             for k, v in summary.items():
                 f.write(f"{k}: {v}\n")
         
-        logger.info("Reports saved successfully.")
+        logger.info(f"Reports saved successfully to: {save_path}")
 
-    def filter_dataset_metadata(self, metadata_csv_path: str, output_csv_path: str) -> pd.DataFrame:
+    def export_clean_dataset(self, output_dir: Optional[str] = None, overwrite_existing: bool = False) -> None:
         """
-        Filters the dataset metadata CSV to keep ONLY nodules where ALL slices are valid.
-        
-        Args:
-            metadata_csv_path: Path to the original regression_dataset.csv
-            output_csv_path: Path to save the cleaned CSV
-            
-        Returns:
-            The cleaned DataFrame
+        Creates a clean dataset containing ONLY valid nodules.
         """
-        df_results = self.get_results_dataframe()
-        if df_results.empty:
-            logger.warning("No analysis results found. Cannot filter.")
-            return pd.DataFrame()
+        if not self.results:
+            logger.warning("No analysis results available. Run analyze() first.")
+            return
 
-        # 1. Identify problematic nodules (PatientID + NoduleIdx)
-        # Group by nodule and check if ANY slice is problematic
-        problematic_nodules = df_results[df_results['is_problematic']]
+        if not overwrite_existing and not output_dir:
+            logger.error("Must provide either 'output_dir' or set 'overwrite_existing=True'.")
+            return
+
+        # 1. Identify Bad Nodules
+        df = self.get_results_dataframe()
+        problematic_nodules = df[df['is_problematic']]
         bad_nodule_keys: Set[Tuple[str, int]] = set()
         
         for _, row in problematic_nodules.iterrows():
             bad_nodule_keys.add((str(row['patient_id']), int(row['nodule_idx'])))
             
-        logger.info(f"Found {len(bad_nodule_keys)} nodules with at least one bad slice.")
+        logger.info(f"Identified {len(bad_nodule_keys)} problematic nodules.")
 
-        # 2. Load original metadata
-        meta_path = Path(metadata_csv_path)
-        if not meta_path.exists():
-            logger.error(f"Metadata file not found: {meta_path}")
-            return pd.DataFrame()
+        # 2. Process Files
+        operations_count = 0
+        
+        for result in self.results:
+            key = (str(result.metadata.get('patient_id')), int(result.metadata.get('nodule_idx', -1)))
+            is_valid_nodule = key not in bad_nodule_keys
             
-        df_meta = pd.read_csv(meta_path)
-        original_count = len(df_meta)
-        
-        # 3. Filter the metadata DataFrame
-        # We define a helper function to check if a row belongs to a bad nodule
-        def is_valid_nodule(row):
-            key = (str(row['patient_id']), int(row['nodule_index']))
-            return key not in bad_nodule_keys
+            img_path = Path(result.filepath)
+            label_path = img_path.parent.parent / 'labels' / (img_path.stem + ".txt")
+            
+            # MODE: Create New Dataset
+            if not overwrite_existing and output_dir:
+                if is_valid_nodule:
+                    rel_path_img = img_path.relative_to(self.dataset_dir)
+                    dest_img = Path(output_dir) / rel_path_img
+                    
+                    try:
+                        rel_path_lbl = label_path.relative_to(self.dataset_dir)
+                        dest_lbl = Path(output_dir) / rel_path_lbl
+                    except ValueError:
+                        dest_lbl = Path(output_dir) / result.split / 'labels' / label_path.name
 
-        df_clean = df_meta[df_meta.apply(is_valid_nodule, axis=1)]
-        clean_count = len(df_clean)
+                    dest_img.parent.mkdir(parents=True, exist_ok=True)
+                    dest_lbl.parent.mkdir(parents=True, exist_ok=True)
+                    
+                    shutil.copy2(img_path, dest_img)
+                    if label_path.exists():
+                        shutil.copy2(label_path, dest_lbl)
+                    
+                    operations_count += 1
+
+            # MODE: Clean In-Place
+            elif overwrite_existing:
+                if not is_valid_nodule:
+                    try:
+                        if img_path.exists(): img_path.unlink()
+                        if label_path.exists(): label_path.unlink()
+                        operations_count += 1
+                    except Exception as e:
+                        logger.error(f"Failed to delete {img_path.name}: {e}")
+
+        if overwrite_existing:
+            logger.info(f"Cleanup Complete: Deleted {operations_count} invalid files.")
+        else:
+            logger.info(f"Export Complete: Copied {operations_count} valid files to {output_dir}.")
+
+        # 3. Handle Metadata CSV
+        self._update_metadata_csv(output_dir, overwrite_existing, bad_nodule_keys)
+
+    def _update_metadata_csv(self, output_dir, overwrite, bad_keys):
+        """Helper to filter and save the metadata CSV."""
+        meta_path = self.dataset_dir / "metadata" / "regression_dataset.csv"
+        if not meta_path.exists():
+            return
+
+        df_meta = pd.read_csv(meta_path)
         
-        # 4. Save
-        df_clean.to_csv(output_csv_path, index=False)
+        def is_valid(row):
+            n_idx = row.get('nodule_index', row.get('nodule_idx', -1))
+            return (str(row['patient_id']), int(n_idx)) not in bad_keys
+
+        df_clean = df_meta[df_meta.apply(is_valid, axis=1)]
         
-        logger.info(f"Filtering Complete: {original_count} -> {clean_count} samples.")
-        logger.info(f"Removed {original_count - clean_count} samples belonging to problematic nodules.")
-        logger.info(f"Clean dataset saved to: {output_csv_path}")
-        
-        return df_clean
+        if overwrite:
+            df_clean.to_csv(meta_path, index=False)
+            logger.info(f"Updated metadata CSV in-place: {meta_path}")
+        elif output_dir:
+            dest_meta_dir = Path(output_dir) / "metadata"
+            dest_meta_dir.mkdir(parents=True, exist_ok=True)
+            df_clean.to_csv(dest_meta_dir / "regression_dataset.csv", index=False)
+            logger.info(f"Saved clean metadata CSV to: {dest_meta_dir}")
+
+    def filter_dataset_metadata(self, metadata_csv_path: str, output_csv_path: str) -> pd.DataFrame:
+        """Keeps compatibility with the previous API call."""
+        return self._update_metadata_csv(None, False, self._get_bad_keys_from_results()) or pd.DataFrame()
+
+    def _get_bad_keys_from_results(self):
+        df = self.get_results_dataframe()
+        problematic = df[df['is_problematic']]
+        bad_keys = set()
+        for _, row in problematic.iterrows():
+            bad_keys.add((str(row['patient_id']), int(row['nodule_idx'])))
+        return bad_keys
 
     def _analyze_directory(self, directory: Path, split: str):
         images = list(directory.glob("*.jpg")) + list(directory.glob("*.png"))
         logger.info(f"Analyzing {len(images)} images in {split}...")
-        
         for idx, filepath in enumerate(images):
             if (idx + 1) % 500 == 0:
                 logger.info(f"Progress: {idx + 1}/{len(images)}")
-            
-            result = self._analyze_single_image(filepath, split)
-            self.results.append(result)
+            self.results.append(self._analyze_single_image(filepath, split))
 
     def _analyze_single_image(self, filepath: Path, split: str) -> ImageAnalysisResult:
         img = cv2.imread(str(filepath))
         metadata = self._extract_metadata_from_filename(filepath.name)
 
         if img is None:
-            return ImageAnalysisResult(
-                filepath=str(filepath), filename=filepath.name, split=split, metadata=metadata,
-                is_problematic=True, problem_type="UNREADABLE"
-            )
+            return ImageAnalysisResult(filepath=str(filepath), filename=filepath.name, split=split, metadata=metadata, is_problematic=True, problem_type="UNREADABLE")
 
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        
         mean_val = float(gray.mean())
         std_val = float(gray.std())
         min_val = int(gray.min())
         max_val = int(gray.max())
         
-        total_pixels = gray.size
-        dark_pixels = np.sum(gray < 50)
-        mid_pixels = np.sum((gray >= 50) & (gray <= 200))
-        bright_pixels = np.sum(gray > 200)
+        total = gray.size
+        dark = np.sum(gray < 50)
+        mid = np.sum((gray >= 50) & (gray <= 200))
+        bright = np.sum(gray > 200)
         
-        dark_ratio = dark_pixels / total_pixels
-        mid_ratio = mid_pixels / total_pixels
-        bright_ratio = bright_pixels / total_pixels
+        dark_ratio = dark / total
+        mid_ratio = mid / total
+        bright_ratio = bright / total
         
         is_uniform = std_val < self.thresholds.uniform_std
         is_too_dark = dark_ratio > self.thresholds.too_dark_ratio
@@ -253,8 +330,7 @@ class DatasetDiagnoser:
         
         return ImageAnalysisResult(
             filepath=str(filepath), filename=filepath.name, split=split, metadata=metadata,
-            mean=round(mean_val, 2), std=round(std_val, 2),
-            min_val=min_val, max_val=max_val,
+            mean=round(mean_val, 2), std=round(std_val, 2), min_val=min_val, max_val=max_val,
             dark_pixel_ratio=round(dark_ratio, 3), mid_pixel_ratio=round(mid_ratio, 3), bright_pixel_ratio=round(bright_ratio, 3),
             is_uniform=is_uniform, is_too_dark=is_too_dark, is_too_bright=is_too_bright,
             is_missing_contrast=is_missing_contrast, has_no_dark_background=has_no_dark_background,
@@ -265,43 +341,16 @@ class DatasetDiagnoser:
         name = Path(filename).stem
         match = re.match(r'^(.+)_n(\d+)_z(\d+)$', name)
         if match:
-            return {
-                "patient_id": match.group(1),
-                "nodule_idx": int(match.group(2)),
-                "slice_idx": int(match.group(3))
-            }
+            return {"patient_id": match.group(1), "nodule_idx": int(match.group(2)), "slice_idx": int(match.group(3))}
         return {}
 
-# Usage Example
 if __name__ == "__main__":
     import sys
-    
     if len(sys.argv) < 2:
         print("Usage: python diagnose_class.py <dataset_dir>")
         sys.exit(1)
         
     dataset_path = sys.argv[1]
-    
-    # Initialize
     diagnoser = DatasetDiagnoser(dataset_path)
-    
-    # Run
     diagnoser.analyze()
-    
-    # Get Data
-    df_all = diagnoser.get_results_dataframe()
-    df_problems = diagnoser.get_problematic_images()
-    summary = diagnoser.get_summary_report()
-    
-    # Print Summary
-    print("\n--- Analysis Summary ---")
-    print(f"Total Images: {summary['total_images']}")
-    print(f"Problematic: {summary['problematic_count']} ({summary['problematic_ratio']:.1%})")
-    print("\nBreakdown by Issue:")
-    for issue, count in summary.get('problem_breakdown', {}).items():
-        print(f"  - {issue}: {count}")
-    
-    # Example: Accessing the DataFrame directly
-    if not df_problems.empty:
-        print("\nSample problematic files:")
-        print(df_problems[['filename', 'problem_type']].head())
+    diagnoser.save_reports_to_disk()

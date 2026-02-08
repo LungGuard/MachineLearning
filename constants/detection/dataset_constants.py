@@ -1,5 +1,5 @@
-
-class RegModelConstants:
+from enum import Enum
+class DatasetConstants:
     
     FILE_NAME = 'filename'
     PATIENT_ID = 'patient_id'
@@ -8,6 +8,16 @@ class RegModelConstants:
     SLICE_INDEX = 'slice_index'
     IMAGE_PATH = 'image_path'
     LABEL_PATH = 'label_path'
+
+
+    TRAIN_IMAGES='train_images'
+    TRAIN_LABELS='train_labels'
+    VAL_IMAGES='val_images'
+    VAL_LABELS='val_labels'
+    TEST_IMAGES = 'test_images'
+    TEST_LABELS = 'test_labels'
+    METADATA = 'metadata'
+
     class Features:
         FEATURE_DIAMETER_MM = 'diameter_mm'
         FEATURE_MALIGNANCY = 'malignancy'
@@ -46,6 +56,7 @@ class RegModelConstants:
         VOLUME_HEIGHT = 'volume_height'
         VOLUME_WIDTH = 'volume_width'
 
+    
 class PreProcessingConstants:
     class HU_VALUES:
         AIR_HU = -1000
@@ -55,6 +66,8 @@ class PreProcessingConstants:
         OFFSET_CORRECTION = 1024
         VALID_PIXEL_MAX = 4000
         OFFSET_PERCENTILE = 5
+
+    
 
     TARGET_SPACING = (1.0, 1.0, 1.0)
     WINDOW_CENTER = -600.0

@@ -9,7 +9,7 @@ import numpy as np
 import torch
 from monai.transforms import ScaleIntensityRange, Zoom
 
-from constants.detection.dataset_constants import RegModelConstants, PreProcessingConstants
+from constants.detection.dataset_constants import DatasetConstants, PreProcessingConstants
 
 from ..utils import (
     VolumePreprocessor,
@@ -159,8 +159,8 @@ class CTScanProcessor:
 
         def is_valid_nodule(nodule_data):
             _, features = nodule_data
-            diameter = features.get(RegModelConstants.Features.FEATURE_DIAMETER_MM, 0)
-            annot_count = features.get(RegModelConstants.Features.FEATURE_ANNOTATION_COUNT, 0)
+            diameter = features.get(DatasetConstants.Features.FEATURE_DIAMETER_MM, 0)
+            annot_count = features.get(DatasetConstants.Features.FEATURE_ANNOTATION_COUNT, 0)
             diameter_valid = self.config.min_nodule_diameter <= diameter <= self.config.max_nodule_diameter
             return diameter_valid and annot_count > 0
 
@@ -183,7 +183,7 @@ class CTScanProcessor:
 
             bbox = BoundingBoxConverter.compute_nodule_bbox_yolo(
                 centroid,
-                features[RegModelConstants.Features.FEATURE_DIAMETER_MM],
+                features[DatasetConstants.Features.FEATURE_DIAMETER_MM],
                 volume_shape,
                 self.config.target_spacing,
                 self.config.bbox_padding_factor
@@ -221,34 +221,34 @@ class CTScanProcessor:
                 return None
 
             metadata_entry = {
-                RegModelConstants.FILE_NAME: filename,
-                RegModelConstants.PATIENT_ID: patient_id,
-                RegModelConstants.SPLIT_GROUP: split,
-                RegModelConstants.NOUDLE_INDEX: nodule_idx,
-                RegModelConstants.SLICE_INDEX: slice_idx,
-                RegModelConstants.Features.FEATURE_DIAMETER_MM: features[RegModelConstants.Features.FEATURE_DIAMETER_MM],
-                RegModelConstants.Features.FEATURE_MALIGNANCY: features[RegModelConstants.Features.FEATURE_MALIGNANCY],
-                RegModelConstants.Features.FEATURE_SPICULATION: features[RegModelConstants.Features.FEATURE_SPICULATION],
-                RegModelConstants.Features.FEATURE_LOBULATION: features[RegModelConstants.Features.FEATURE_LOBULATION],
-                RegModelConstants.Features.FEATURE_SUBTLETY: features[RegModelConstants.Features.FEATURE_SUBTLETY],
-                RegModelConstants.Features.FEATURE_SPHERICITY: features[RegModelConstants.Features.FEATURE_SPHERICITY],
-                RegModelConstants.Features.FEATURE_MARGIN: features[RegModelConstants.Features.FEATURE_MARGIN],
-                RegModelConstants.Features.FEATURE_TEXTURE: features[RegModelConstants.Features.FEATURE_TEXTURE],
-                RegModelConstants.Features.FEATURE_CALCIFICATION: features[RegModelConstants.Features.FEATURE_CALCIFICATION],
-                RegModelConstants.Features.FEATURE_INTERNAL_STRUCTURE: features[RegModelConstants.Features.FEATURE_INTERNAL_STRUCTURE],
-                RegModelConstants.Features.FEATURE_ANNOTATION_COUNT: features[RegModelConstants.Features.FEATURE_ANNOTATION_COUNT],
-                RegModelConstants.CENTROID.CENTROID_Z: centroid[0],
-                RegModelConstants.CENTROID.CENTROID_Y: centroid[1],
-                RegModelConstants.CENTROID.CENTROID_X: centroid[2],
-                RegModelConstants.BBOX.BBOX_X: bbox[0],
-                RegModelConstants.BBOX.BBOX_Y: bbox[1],
-                RegModelConstants.BBOX.BBOX_W: bbox[2],
-                RegModelConstants.BBOX.BBOX_H: bbox[3],
-                RegModelConstants.IMAGE_PATH: save_result.image_path,
-                RegModelConstants.LABEL_PATH: save_result.label_path,
-                RegModelConstants.VOLUME.VOLUME_DEPTH: volume_shape[0],
-                RegModelConstants.VOLUME.VOLUME_HEIGHT: volume_shape[1],
-                RegModelConstants.VOLUME.VOLUME_WIDTH: volume_shape[2]
+                DatasetConstants.FILE_NAME: filename,
+                DatasetConstants.PATIENT_ID: patient_id,
+                DatasetConstants.SPLIT_GROUP: split,
+                DatasetConstants.NOUDLE_INDEX: nodule_idx,
+                DatasetConstants.SLICE_INDEX: slice_idx,
+                DatasetConstants.Features.FEATURE_DIAMETER_MM: features[DatasetConstants.Features.FEATURE_DIAMETER_MM],
+                DatasetConstants.Features.FEATURE_MALIGNANCY: features[DatasetConstants.Features.FEATURE_MALIGNANCY],
+                DatasetConstants.Features.FEATURE_SPICULATION: features[DatasetConstants.Features.FEATURE_SPICULATION],
+                DatasetConstants.Features.FEATURE_LOBULATION: features[DatasetConstants.Features.FEATURE_LOBULATION],
+                DatasetConstants.Features.FEATURE_SUBTLETY: features[DatasetConstants.Features.FEATURE_SUBTLETY],
+                DatasetConstants.Features.FEATURE_SPHERICITY: features[DatasetConstants.Features.FEATURE_SPHERICITY],
+                DatasetConstants.Features.FEATURE_MARGIN: features[DatasetConstants.Features.FEATURE_MARGIN],
+                DatasetConstants.Features.FEATURE_TEXTURE: features[DatasetConstants.Features.FEATURE_TEXTURE],
+                DatasetConstants.Features.FEATURE_CALCIFICATION: features[DatasetConstants.Features.FEATURE_CALCIFICATION],
+                DatasetConstants.Features.FEATURE_INTERNAL_STRUCTURE: features[DatasetConstants.Features.FEATURE_INTERNAL_STRUCTURE],
+                DatasetConstants.Features.FEATURE_ANNOTATION_COUNT: features[DatasetConstants.Features.FEATURE_ANNOTATION_COUNT],
+                DatasetConstants.CENTROID.CENTROID_Z: centroid[0],
+                DatasetConstants.CENTROID.CENTROID_Y: centroid[1],
+                DatasetConstants.CENTROID.CENTROID_X: centroid[2],
+                DatasetConstants.BBOX.BBOX_X: bbox[0],
+                DatasetConstants.BBOX.BBOX_Y: bbox[1],
+                DatasetConstants.BBOX.BBOX_W: bbox[2],
+                DatasetConstants.BBOX.BBOX_H: bbox[3],
+                DatasetConstants.IMAGE_PATH: save_result.image_path,
+                DatasetConstants.LABEL_PATH: save_result.label_path,
+                DatasetConstants.VOLUME.VOLUME_DEPTH: volume_shape[0],
+                DatasetConstants.VOLUME.VOLUME_HEIGHT: volume_shape[1],
+                DatasetConstants.VOLUME.VOLUME_WIDTH: volume_shape[2]
             }
             return metadata_entry
 

@@ -5,7 +5,7 @@ Utilities for processing nodule annotations from radiologists.
 
 import numpy as np
 from typing import Tuple, Optional, List
-from constants.detection.dataset_constants import RegModelConstants
+from constants.detection.dataset_constants import DatasetConstants
 from .coordinate_transformer import CoordinateTransformer
 from .bounding_box_converter import BoundingBoxConverter
 
@@ -54,8 +54,8 @@ class NoduleAnnotationProcessor:
         LIDC-IDRI nodules have 1-4 independent radiologist annotations.
         This function computes consensus features using averaging.
         """
-        default_features = RegModelConstants.Features.DEFAULT_FEATURES
-        default_features[RegModelConstants.Features.FEATURE_DIAMETER_MM] = fallback_diameter
+        default_features = DatasetConstants.Features.DEFAULT_FEATURES
+        default_features[DatasetConstants.Features.FEATURE_DIAMETER_MM] = fallback_diameter
 
         def get_feature_value(feature_scores, feature_key):
             """Return the feature value if scores exist, otherwise return default."""
@@ -78,27 +78,27 @@ class NoduleAnnotationProcessor:
         diameters = list(map(BoundingBoxConverter.compute_diameter, bboxs))
         
         features = {
-            RegModelConstants.Features.FEATURE_DIAMETER_MM: get_feature_value(
-                diameters, RegModelConstants.Features.FEATURE_DIAMETER_MM),
-            RegModelConstants.Features.FEATURE_MALIGNANCY: get_feature_value(
-                malignancy_scores, RegModelConstants.Features.FEATURE_MALIGNANCY),
-            RegModelConstants.Features.FEATURE_SPICULATION: get_feature_value(
-                spiculation_scores, RegModelConstants.Features.FEATURE_SPICULATION),
-            RegModelConstants.Features.FEATURE_LOBULATION: get_feature_value(
-                lobulation_scores, RegModelConstants.Features.FEATURE_LOBULATION),
-            RegModelConstants.Features.FEATURE_SUBTLETY: get_feature_value(
-                subtlety_scores, RegModelConstants.Features.FEATURE_SUBTLETY),
-            RegModelConstants.Features.FEATURE_SPHERICITY: get_feature_value(
-                sphericity_scores, RegModelConstants.Features.FEATURE_SPHERICITY),
-            RegModelConstants.Features.FEATURE_MARGIN: get_feature_value(
-                margin_scores, RegModelConstants.Features.FEATURE_MARGIN),
-            RegModelConstants.Features.FEATURE_TEXTURE: get_feature_value(
-                texture_scores, RegModelConstants.Features.FEATURE_TEXTURE),
-            RegModelConstants.Features.FEATURE_CALCIFICATION: get_feature_value(
-                calcification_scores, RegModelConstants.Features.FEATURE_CALCIFICATION),
-            RegModelConstants.Features.FEATURE_INTERNAL_STRUCTURE: get_feature_value(
-                internal_structure_scores, RegModelConstants.Features.FEATURE_INTERNAL_STRUCTURE),
-            RegModelConstants.Features.FEATURE_ANNOTATION_COUNT: len(annotations)
+            DatasetConstants.Features.FEATURE_DIAMETER_MM: get_feature_value(
+                diameters, DatasetConstants.Features.FEATURE_DIAMETER_MM),
+            DatasetConstants.Features.FEATURE_MALIGNANCY: get_feature_value(
+                malignancy_scores, DatasetConstants.Features.FEATURE_MALIGNANCY),
+            DatasetConstants.Features.FEATURE_SPICULATION: get_feature_value(
+                spiculation_scores, DatasetConstants.Features.FEATURE_SPICULATION),
+            DatasetConstants.Features.FEATURE_LOBULATION: get_feature_value(
+                lobulation_scores, DatasetConstants.Features.FEATURE_LOBULATION),
+            DatasetConstants.Features.FEATURE_SUBTLETY: get_feature_value(
+                subtlety_scores, DatasetConstants.Features.FEATURE_SUBTLETY),
+            DatasetConstants.Features.FEATURE_SPHERICITY: get_feature_value(
+                sphericity_scores, DatasetConstants.Features.FEATURE_SPHERICITY),
+            DatasetConstants.Features.FEATURE_MARGIN: get_feature_value(
+                margin_scores, DatasetConstants.Features.FEATURE_MARGIN),
+            DatasetConstants.Features.FEATURE_TEXTURE: get_feature_value(
+                texture_scores, DatasetConstants.Features.FEATURE_TEXTURE),
+            DatasetConstants.Features.FEATURE_CALCIFICATION: get_feature_value(
+                calcification_scores, DatasetConstants.Features.FEATURE_CALCIFICATION),
+            DatasetConstants.Features.FEATURE_INTERNAL_STRUCTURE: get_feature_value(
+                internal_structure_scores, DatasetConstants.Features.FEATURE_INTERNAL_STRUCTURE),
+            DatasetConstants.Features.FEATURE_ANNOTATION_COUNT: len(annotations)
         }
         
         return features
@@ -173,7 +173,7 @@ class NoduleAnnotationProcessor:
         # Average centroid in original space
         avg_centroid = tuple(
             sum(c[i] for c in centroids) / len(centroids)
-            for i in range(RegModelConstants.CENTROID.CENTROID_DIM)
+            for i in range(DatasetConstants.CENTROID.CENTROID_DIM)
         )
         
         # Transform to resampled space if spacing provided
