@@ -1,11 +1,4 @@
-"""
-CT Scan Processing Module - MONAI Powered (Corrected)
-
-Uses MONAI transforms for medical image preprocessing with proper:
-- Offset detection for uncalibrated scans
-- Lung windowing (center=-600, width=1500)
-- Resize to fixed 512x512 output
-"""
+"""CT Scan Processing Module - MONAI Powered."""
 
 import logging
 import traceback
@@ -16,11 +9,7 @@ import numpy as np
 import torch
 from monai.transforms import ScaleIntensityRange, Zoom
 
-from constants.detection.dataset_constants import RegModelConstants
-
-import sys
-from pathlib import Path as PathLib
-sys.path.insert(0, str(PathLib(__file__).parent.parent))
+from constants.detection.dataset_constants import RegModelConstants, PreProcessingConstants
 
 from ..utils import (
     VolumePreprocessor,
@@ -33,54 +22,44 @@ from .file_io import atomic_save_image_and_label
 
 logger = logging.getLogger(__name__)
 
+HU = PreProcessingConstants.HU_VALUES
+INTENSITY = PreProcessingConstants.INTENSITY_RANGE
+
 
 class CTScanProcessor:
-    """Processor for CT scans - handles volume preparation using MONAI Classes."""
-    
+    """Processor for CT scans - handles volume preparation using MONAI transforms."""
+
     def __init__(self, config, directories: Dict[str, Path]):
         self.config = config
         self.directories = directories
         self.logger = logging.getLogger(__name__)
-    
+
     def _load_volume(self, scan, patient_id: str):
-        """Load volume from scan using pylidc."""
         try:
-            volume = scan.to_volume()
-            return volume
+            return scan.to_volume()
         except Exception as e:
             self.logger.error(f"[{patient_id}] FAILED at volume loading: {e}")
             return None
-    
+
     def _get_spacing(self, scan, patient_id: str):
-        """Extract spacing information."""
         try:
-            spacing_val = scan.pixel_spacing
-            if isinstance(spacing_val, (float, int, np.floating, np.integer)):
-                 xy_spacing = [float(spacing_val), float(spacing_val)]
+            pixel_spacing_raw = scan.pixel_spacing
+            if isinstance(pixel_spacing_raw, (float, int, np.floating, np.integer)):
+                 xy_spacing = [float(pixel_spacing_raw), float(pixel_spacing_raw)]
             else:
-                 xy_spacing = [float(spacing_val[0]), float(spacing_val[1])]
-            
+                 xy_spacing = [float(pixel_spacing_raw[0]), float(pixel_spacing_raw[1])]
+
             slice_spacing = float(scan.slice_spacing)
-            # MONAI Order: (Z, Y, X)
             original_spacing = (slice_spacing, xy_spacing[0], xy_spacing[1])
             return original_spacing
         except Exception as e:
             self.logger.error(f"[{patient_id}] FAILED at spacing extraction: {e}")
             return None
-    
-    def prepare_volume(self, scan, patient_id: str):
-        """
-        Load, Clean (with offset detection), Resample, and Window using MONAI transforms.
 
-        Pipeline order:
-        1. Load raw volume
-        2. Clean with offset detection (numpy) - handles uncalibrated scans
-        3. Resample to isotropic spacing (MONAI Zoom)
-        4. Apply lung windowing (MONAI ScaleIntensityRange)
-        """
-        # 1. Load Raw Data
-        volume_np = self._load_volume(scan, patient_id)
-        if volume_np is None:
+    def prepare_volume(self, scan, patient_id: str):
+        """Load, clean, resample, and window a CT volume using MONAI transforms."""
+        raw_volume = self._load_volume(scan, patient_id)
+        if raw_volume is None:
             return None
 
         original_spacing = self._get_spacing(scan, patient_id)
@@ -88,19 +67,15 @@ class CTScanProcessor:
             return None
 
         try:
-            # 2. CLEAN WITH OFFSET DETECTION (numpy - before any transforms)
-            # This handles: NaNs, padding values, and offset scans
-            volume_np = self._clean_volume_with_offset_detection(volume_np, patient_id)
+            raw_volume = self._clean_volume_with_offset_detection(raw_volume, patient_id)
 
-            # 3. Convert to PyTorch Tensor (Channel First: 1, D, H, W)
-            volume_t = torch.from_numpy(volume_np).float().unsqueeze(0)
+            volume_tensor = torch.from_numpy(raw_volume).float().unsqueeze(0)
+            volume_tensor = torch.clamp(
+                volume_tensor,
+                min=float(HU.AIR_HU),
+                max=float(HU.MAX_HU)
+            )
 
-            # 4. CRITICAL: Clamp intensity BEFORE interpolation
-            # This ensures padding values don't get interpolated during Zoom
-            # Equivalent to MONAI's ClampIntensity but without import issues
-            volume_t = torch.clamp(volume_t, min=-1000.0, max=3000.0)
-
-            # 5. SPATIAL RESAMPLING using MONAI Zoom
             zoom_factors = [
                 orig / target
                 for orig, target in zip(original_spacing, self.config.target_spacing)
@@ -109,35 +84,26 @@ class CTScanProcessor:
             zoomer = Zoom(
                 zoom=zoom_factors,
                 mode="bilinear",
-                padding_mode="border",  # Prevents grey border artifacts
+                padding_mode="border",
                 keep_size=False
             )
-            vol_resampled = zoomer(volume_t)
+            resampled_volume = zoomer(volume_tensor)
 
-            # 6. LUNG WINDOWING using MONAI ScaleIntensityRange
-            # Lung window: center=-600, width=1500 -> range [-1350, +150]
-            window_center = getattr(self.config, 'window_center', -600.0)
-            window_width = getattr(self.config, 'window_width', 1500.0)
-            window_min = window_center - (window_width / 2.0)  # -1350
-            window_max = window_center + (window_width / 2.0)  # +150
+            window_center = getattr(self.config, 'window_center', PreProcessingConstants.WINDOW_CENTER)
+            window_width = getattr(self.config, 'window_width', PreProcessingConstants.WINDOW_WIDTH)
+            window_min = window_center - (window_width / 2.0)
+            window_max = window_center + (window_width / 2.0)
 
             scaler = ScaleIntensityRange(
                 a_min=window_min,
                 a_max=window_max,
-                b_min=0.0,
-                b_max=1.0,
+                b_min=INTENSITY.OUTPUT_MIN,
+                b_max=INTENSITY.OUTPUT_MAX,
                 clip=True
             )
-            vol_windowed = scaler(vol_resampled)
+            windowed_volume = scaler(resampled_volume)
 
-            # 7. Convert back to Numpy
-            final_volume = vol_windowed[0].numpy()
-
-            self.logger.debug(
-                f"[{patient_id}] MONAI processing complete: shape={final_volume.shape}, "
-                f"range=[{final_volume.min():.3f}, {final_volume.max():.3f}]"
-            )
-
+            final_volume = windowed_volume[0].numpy()
             return final_volume, final_volume.shape, original_spacing
 
         except Exception as e:
@@ -146,69 +112,43 @@ class CTScanProcessor:
             return None
 
     def _clean_volume_with_offset_detection(self, volume: np.ndarray, patient_id: str) -> np.ndarray:
-        """
-        Clean volume with offset detection - handles uncalibrated LIDC scans.
-
-        Operations:
-        1. Handle NaNs
-        2. Detect and handle padding values (< -1500)
-        3. Detect offset scans (5th percentile > -100) and apply -1024 correction
-        4. Set padding to air (-1000 HU)
-        5. Clip to valid HU range
-        """
+        """Clean volume: handle NaNs, detect padding/offset, clip to valid HU range."""
         volume = volume.astype(np.float32)
 
-        # Handle NaNs
         nan_count = np.isnan(volume).sum()
         if nan_count > 0:
-            self.logger.warning(f"[{patient_id}] Found {nan_count} NaN values, replacing with -1000")
-            volume = np.nan_to_num(volume, nan=-1000.0)
+            self.logger.warning(f"[{patient_id}] Found {nan_count} NaN values, replacing with air HU")
+            volume = np.nan_to_num(volume, nan=float(HU.AIR_HU))
 
-        # Create padding mask (values < -1500 are padding: -2048, -3024, etc.)
-        PADDING_THRESHOLD = -1500.0
-        padding_mask = volume < PADDING_THRESHOLD
+        padding_mask = volume < HU.PADDING_THRESHOLD
         padding_count = padding_mask.sum()
 
-        # Detect offset using center slice
-        depth = volume.shape[0]
-        center_slice = volume[depth // 2]
-        valid_mask = (center_slice > PADDING_THRESHOLD) & (center_slice < 4000)
+        center_slice = volume[volume.shape[0] // 2]
+        valid_mask = (center_slice > HU.PADDING_THRESHOLD) & (center_slice < HU.VALID_PIXEL_MAX)
         valid_pixels = center_slice[valid_mask]
 
-        offset_applied = False
         if len(valid_pixels) > 0:
-            percentile_5 = np.percentile(valid_pixels, 5)
-            OFFSET_THRESHOLD = -100.0
+            low_percentile = np.percentile(valid_pixels, HU.OFFSET_PERCENTILE)
 
-            if percentile_5 > OFFSET_THRESHOLD:
+            if low_percentile > HU.OFFSET_THRESHOLD:
                 self.logger.info(
-                    f"[{patient_id}] Offset scan detected (P5={percentile_5:.1f}). "
-                    f"Applying -1024 correction."
+                    f"[{patient_id}] Offset scan detected (P5={low_percentile:.1f}). "
+                    f"Applying -{HU.OFFSET_CORRECTION} correction."
                 )
-                volume[~padding_mask] -= 1024.0
-                offset_applied = True
+                volume[~padding_mask] -= float(HU.OFFSET_CORRECTION)
 
-        # Set padding to air BEFORE resampling
         if padding_count > 0:
-            volume[padding_mask] = -1000.0
+            volume[padding_mask] = float(HU.AIR_HU)
 
-        # Clip to valid HU range
-        volume = np.clip(volume, -1000.0, 3000.0)
-
-        self.logger.debug(
-            f"[{patient_id}] Volume cleaned: min={volume.min():.1f}, max={volume.max():.1f}, "
-            f"offset_applied={offset_applied}"
-        )
-
+        volume = np.clip(volume, float(HU.AIR_HU), float(HU.MAX_HU))
         return volume
 
     def extract_valid_nodules(self, scan, patient_id: str) -> List[Tuple]:
-        """Extract and filter valid nodules from scan."""
         try:
             nodules = scan.cluster_annotations()
         except Exception:
             return []
-        
+
         try:
             nodule_features = []
             for idx, annotations in enumerate(nodules):
@@ -216,27 +156,24 @@ class CTScanProcessor:
                 nodule_features.append((annotations, features))
         except Exception:
             return []
-            
+
         def is_valid_nodule(nodule_data):
             _, features = nodule_data
             diameter = features.get(RegModelConstants.Features.FEATURE_DIAMETER_MM, 0)
             annot_count = features.get(RegModelConstants.Features.FEATURE_ANNOTATION_COUNT, 0)
             diameter_valid = self.config.min_nodule_diameter <= diameter <= self.config.max_nodule_diameter
             return diameter_valid and annot_count > 0
-        
+
         return list(filter(is_valid_nodule, nodule_features))
 
-    def process_single_slice(self, slice_idx, nodule_idx, centroid, features, windowed, volume_shape, patient_id, split):
-        """Process single slice: create 2.5D image, compute bbox, center crop, save, generate metadata."""
+    def process_single_slice(self, slice_idx, nodule_idx, centroid, features, volume, volume_shape, patient_id, split):
         try:
-            # Get target size from config
             target_size = getattr(self.config, 'output_image_size', (512, 512))
             use_center_crop = getattr(self.config, 'use_center_crop', True)
             max_scale = getattr(self.config, 'max_scale', 1.2)
 
-            # Create 2.5D image with center crop (returns image and crop_info)
             image_25d, crop_info = VolumePreprocessor.create_25d_sandwich(
-                windowed,
+                volume,
                 slice_idx,
                 target_size=target_size,
                 use_center_crop=use_center_crop,
@@ -246,7 +183,6 @@ class CTScanProcessor:
             if image_25d is None or image_25d.size == 0:
                 return None
 
-            # Compute bbox in original volume coordinates
             bbox = BoundingBoxConverter.compute_nodule_bbox_yolo(
                 centroid,
                 features[RegModelConstants.Features.FEATURE_DIAMETER_MM],
@@ -258,33 +194,19 @@ class CTScanProcessor:
             if bbox is None:
                 return None
 
-            # Adjust bbox for center crop or padding
             if target_size is not None:
-                original_size = (volume_shape[1], volume_shape[2])  # (height, width)
+                original_size = (volume_shape[1], volume_shape[2])
 
                 if crop_info is not None:
-                    # Center crop was used - adjust bbox accordingly
                     scale, crop_offset = crop_info
                     bbox = BoundingBoxConverter.adjust_bbox_for_center_crop(
-                        bbox,
-                        original_size,
-                        target_size,
-                        scale,
-                        crop_offset
+                        bbox, original_size, target_size, scale, crop_offset
                     )
-                    # If bbox is None, nodule was cropped out of frame
                     if bbox is None:
-                        self.logger.debug(
-                            f"[{patient_id}] Slice {slice_idx}: nodule center cropped out of frame"
-                        )
                         return None
                 else:
-                    # Padding was used
                     bbox = BoundingBoxConverter.adjust_bbox_for_resize(
-                        bbox,
-                        original_size,
-                        target_size,
-                        preserve_aspect_ratio=True
+                        bbox, original_size, target_size, preserve_aspect_ratio=True
                     )
 
             filename = f"{patient_id}_n{nodule_idx:02d}_z{slice_idx:04d}"
@@ -337,8 +259,7 @@ class CTScanProcessor:
             self.logger.debug(traceback.format_exc())
             return None
 
-    def process_nodule(self, nodule_idx, annotations, features, patient_id, split, windowed, volume_shape, original_spacing):
-        """Process single nodule and generate metadata for its slices."""
+    def process_nodule(self, nodule_idx, annotations, features, patient_id, split, volume, volume_shape, original_spacing):
         nodule_results = []
         try:
             centroid = NoduleAnnotationProcessor.get_nodule_centroid(
@@ -349,40 +270,39 @@ class CTScanProcessor:
             slice_indices = NoduleAnnotationProcessor.get_nodule_slice_indices(
                 annotations, volume_shape[0], original_spacing, self.config.target_spacing
             )
-            
+
             selected_slices = self._select_representative_slices(
                 slice_indices, self.config.slices_per_nodule
             )
-            
+
             for slice_idx in selected_slices:
-                meta = self.process_single_slice(
-                    slice_idx, nodule_idx, centroid, features, windowed, volume_shape, patient_id, split
+                metadata = self.process_single_slice(
+                    slice_idx, nodule_idx, centroid, features, volume, volume_shape, patient_id, split
                 )
-                if meta: nodule_results.append(meta)
-                
+                if metadata: nodule_results.append(metadata)
+
         except Exception as e:
             self.logger.error(f"[{patient_id}] Nodule error: {e}")
-            
+
         return nodule_results
 
     def process_scan(self, scan, split, pl_module=None):
-        """Process single CT scan (main orchestrator)."""
         metadata_rows = []
         patient_id = scan.patient_id
-        
+
         volume_result = self.prepare_volume(scan, patient_id)
         if volume_result is None: return []
-        
-        windowed, volume_shape, original_spacing = volume_result
-        
+
+        volume, volume_shape, original_spacing = volume_result
+
         valid_nodules = self.extract_valid_nodules(scan, patient_id)
-        
-        for idx, (anns, feats) in enumerate(valid_nodules):
+
+        for idx, (annotations, features) in enumerate(valid_nodules):
             rows = self.process_nodule(
-                idx, anns, feats, patient_id, split, windowed, volume_shape, original_spacing
+                idx, annotations, features, patient_id, split, volume, volume_shape, original_spacing
             )
             metadata_rows.extend(rows)
-            
+
         return metadata_rows
 
     @staticmethod
