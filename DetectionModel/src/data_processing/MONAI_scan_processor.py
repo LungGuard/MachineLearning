@@ -170,14 +170,12 @@ class CTScanProcessor:
         try:
             target_size = getattr(self.config, 'output_image_size', (512, 512))
             use_center_crop = getattr(self.config, 'use_center_crop', True)
-            max_scale = getattr(self.config, 'max_scale', 1.2)
 
             image_25d, crop_info = VolumePreprocessor.create_25d_sandwich(
                 volume,
                 slice_idx,
                 target_size=target_size,
                 use_center_crop=use_center_crop,
-                max_scale=max_scale
             )
 
             if image_25d is None or image_25d.size == 0:

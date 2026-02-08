@@ -26,7 +26,6 @@ class DataPrepConfig:
     # Output image size for YOLO (all images will be resized to this)
     output_image_size: Tuple[int, int] = (512, 512)  # (height, width)
     use_center_crop: bool = True  # True = center crop (fills frame), False = padding (black bars)
-    max_scale: float = 1.2  # Maximum zoom factor for center crop (1.2 = 20% max zoom)
 
     min_nodule_diameter: float = 3.0  # mm
     max_nodule_diameter: float = 100.0  #mm

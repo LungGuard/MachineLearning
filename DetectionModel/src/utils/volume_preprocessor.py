@@ -227,35 +227,21 @@ class VolumePreprocessor:
     def center_crop_slice(
         slice_2d: np.ndarray,
         target_size: Tuple[int, int] = (512, 512),
-        max_scale: float = 1.2
     ) -> Tuple[np.ndarray, float, Tuple[int, int]]:
         """
-        Center crop strategy with maximum scale limit.
-
-        Resizes image (capped at max_scale), then centers in target frame.
-        - If resized image > target: crops center
-        - If resized image < target: pads with black
-
-        Args:
-            slice_2d: Input 2D array (H, W) or (H, W, C) for RGB
-            target_size: Target dimensions as (height, width)
-            max_scale: Maximum zoom factor to prevent over-zooming (default 1.2)
+        Resize so the smallest dimension fills the target, then center crop.
 
         Returns:
             Tuple of:
             - output_image: (target_h, target_w) or (target_h, target_w, C)
-            - scale: the scale factor actually applied
-            - effective_offset: (y_offset, x_offset) for bbox adjustment
-                - Positive if cropped (offset into resized image)
-                - Negative if padded (offset in output canvas)
+            - scale: the scale factor applied
+            - effective_offset: (y_offset, x_offset) — always >= 0 (crop only)
         """
         target_h, target_w = target_size
         h, w = slice_2d.shape[:2]
         is_rgb = len(slice_2d.shape) == 3
 
-        # Calculate natural scale (to fill frame) and cap it
-        natural_scale = max(target_h / h, target_w / w)
-        scale = min(natural_scale, max_scale)
+        scale = max(target_h / h, target_w / w)
 
         new_h = int(h * scale)
         new_w = int(w * scale)
@@ -303,7 +289,7 @@ class VolumePreprocessor:
         effective_x_offset = x_diff // 2
 
         logger.debug(
-            f"Center crop: ({h}, {w}) -> scale {scale:.3f} (max={max_scale}) -> "
+            f"Center crop: ({h}, {w}) -> scale {scale:.3f} -> "
             f"({new_h}, {new_w}) -> offset ({effective_y_offset}, {effective_x_offset}) -> "
             f"({target_h}, {target_w})"
         )
@@ -316,29 +302,15 @@ class VolumePreprocessor:
         z_index: int,
         target_size: Optional[Tuple[int, int]] = None,
         use_center_crop: bool = True,
-        max_scale: float = 1.2
     ) -> Tuple[np.ndarray, Optional[Tuple[float, Tuple[int, int]]]]:
         """
         Create a 2.5D RGB image from adjacent CT slices.
 
-        2.5D representation uses 3 adjacent slices as RGB channels,
-        capturing spatial context while maintaining 2D compatibility.
-
-        Args:
-            volume: 3D volume array (D, H, W) with values in [0, 1] after windowing
-            z_index: Target slice index
-            target_size: Optional target size (height, width). If provided, resizes output.
-            use_center_crop: If True, use center crop (fills frame). If False, use padding.
-            max_scale: Maximum zoom factor when using center crop (default 1.2)
-
-        Channels:
-        - Red: slice at z_index - 1 (previous)
-        - Green: slice at z_index (current/target)
-        - Blue: slice at z_index + 1 (next)
+        Channels: R=z-1, G=z, B=z+1
 
         Returns:
             Tuple of:
-            - RGB image as uint8 array with shape (H, W, 3) or (target_size[0], target_size[1], 3)
+            - RGB image as uint8 (H, W, 3)
             - crop_info: (scale, (y_offset, x_offset)) if center_crop used, None otherwise
         """
         depth, height, width = volume.shape
@@ -347,30 +319,23 @@ class VolumePreprocessor:
         z_curr = z_index
         z_next = min(depth - 1, z_index + 1)
 
-        slice_prev = volume[z_prev]
-        slice_curr = volume[z_curr]
-        slice_next = volume[z_next]
-
-        sandwich = np.stack([slice_prev, slice_curr, slice_next], axis=-1)
+        sandwich = np.stack([volume[z_prev], volume[z_curr], volume[z_next]], axis=-1)
         rgb_image = (sandwich * 255.0).astype(np.uint8)
 
         crop_info = None
 
-        # Resize/crop if target_size is specified
         if target_size is not None:
             if use_center_crop:
-                # Center crop with max scale limit
                 rgb_image, scale, crop_offset = VolumePreprocessor.center_crop_slice(
-                    rgb_image, target_size, max_scale=max_scale
+                    rgb_image, target_size
                 )
                 crop_info = (scale, crop_offset)
             else:
-                # Padding: resize so largest dim = target, then pad
                 rgb_image = VolumePreprocessor.resize_slice_to_target(
                     rgb_image,
                     target_size=target_size,
                     preserve_aspect_ratio=True,
-                    pad_value=0  # Black padding for uint8 images
+                    pad_value=0
                 )
 
         return rgb_image, crop_info
