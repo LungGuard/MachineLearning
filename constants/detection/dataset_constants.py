@@ -60,6 +60,8 @@ class PreProcessingConstants:
     WINDOW_CENTER = -600.0
     WINDOW_WIDTH = 1500.0
 
+    MAX_CROP_SCALE = 1.5
+
     class INTENSITY_RANGE:
         OUTPUT_MIN = 0.0
         OUTPUT_MAX = 1.0

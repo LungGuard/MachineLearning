@@ -241,7 +241,8 @@ class VolumePreprocessor:
         h, w = slice_2d.shape[:2]
         is_rgb = len(slice_2d.shape) == 3
 
-        scale = max(target_h / h, target_w / w)
+        natural_scale = max(target_h / h, target_w / w)
+        scale = min(natural_scale, PreProcessingConstants.MAX_CROP_SCALE)
 
         new_h = int(h * scale)
         new_w = int(w * scale)

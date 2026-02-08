@@ -67,7 +67,6 @@ def setup_logging(debug: bool = False) -> None:
 from .config import DataPrepConfig
 from .pylidc_config import configure_pylidc, import_pylidc
 from .data_splitter import split_patients_by_id, get_patient_split
-from .scan_processor import CTScanProcessor
 from .MONAI_scan_processor import CTScanProcessor as MonaiCTProcessor
 from .dataset_writer import (
     save_metadata_csv,
