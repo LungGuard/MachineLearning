@@ -1,134 +1,188 @@
-
-
-import torch as pt
+import torch
 import torch.nn as nn
+import lightning as L
 from pathlib import Path
 from torchmetrics import MetricCollection
-import logging
-from .pt_layers.Conv2D_block import Conv2DBlock
-from .pt_layers.DenseBlock import DenseBlock
 from utils.notification_service import NtfyNotificationService
+import logging
 
 logger = logging.getLogger(__name__)
 
-class BaseCNNModel(nn.Module):
+
+class BaseCNNModel(L.LightningModule):
     """
-    Base class for Convolutional Neural Networks in PyTorch.
+    Abstract base for all LungGuard CNN models.
     """
 
-    def __init__(self, input_shape, model_name):
-        super(BaseCNNModel, self).__init__()
+    def __init__(self, input_shape: tuple, model_name: str, learning_rate: float = 1e-3):
+        super().__init__()
+
+        self.save_hyperparameters()  # auto-saves init args for checkpoint reload
+
         self.model_name = model_name
-        self.channels,self.height,self.width, = input_shape 
-        self.notifier=NtfyNotificationService(model_name=model_name)
+        self.channels, self.height, self.width = input_shape
+        self.learning_rate = learning_rate
+
         self.features = nn.ModuleList()
+        self.notifier = NtfyNotificationService(model_name=model_name)
 
-    def load_checkpoint(self, checkpoint_path):
-        """
-        Implementation for PyTorch state_dict loading
-        """
-        checkpoint_path = Path(checkpoint_path)
-        if not checkpoint_path.exists():
-            raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
-        
-        logger.info(f"Loading weights from: {checkpoint_path}")
-        try:
-            state_dict = pt.load(checkpoint_path, map_location=pt.device('cpu'))
-            self.load_state_dict(state_dict)
-            logger.debug("Weights loaded successfully")
-        except Exception as e:
-            logger.debug(f"Failed to load PyTorch model: {e}")
-            raise e
+    def _build_model(self, freeze_params=True, **kwargs):
+        """Subclasses build their architecture here."""
+        raise NotImplementedError
 
-    def _get_conv_block(self, in_channels, out_channels, kernel_size=3, activation=nn.ReLU()):
-        """Helper to create a standard convolution block."""
-        return Conv2DBlock(in_channels, out_channels, kernel_size, activation)
-
-    def _get_dense_block(self, in_features, out_features, activation=nn.ReLU()):
-        """Helper to create a standard dense block."""
-        return DenseBlock(in_features, out_features, activation)
-    
     def forward(self, x):
-        raise NotImplementedError("Subclasses must implement forward()")
-    
-    def evaluate_model(self, test_loader, criterion, metrics=None, present_metrics=False, send_message=False):
-        """
-        Main evaluation method. Orchestrates calculation, presentation, and notification.
-        """
-        # 1. Responsibility: Calculate Metrics
-        results = self._calculate_metrics(test_loader, criterion, metrics)
+        """Subclasses define forward pass."""
+        raise NotImplementedError
 
-        # 2. Responsibility: Present Results
-        if present_metrics:
-            self._present_results(results)
-
-        # 3. Responsibility: Send Notification
-        if send_message:
-            self._send_notification(results)
-
-        return results
-
-    def _calculate_metrics(self, test_loader, criterion, metrics):
+    def training_step(self, batch, batch_idx) -> torch.Tensor:
         """
-        Handles the PyTorch evaluation loop and metric computation.
-        Returns a dictionary of results (e.g., {'loss': 0.5, 'accuracy': 0.9}).
+        Subclasses compute and return loss for one batch.
         """
-        self.eval()
-        device = next(self.parameters()).device
-        
-        if metrics:
-            if isinstance(metrics, dict):
-                metrics = MetricCollection(metrics).to(device)
-            else:
-                metrics = metrics.to(device)
-            metrics.reset()
+        raise NotImplementedError
 
-        running_loss = 0.0
-        total_samples = 0
-        
-        with pt.no_grad():
-            for data, target in test_loader:
-                data, target = data.to(device), target.to(device)
-                
-                output = self(data)
-                
-                # Loss calculation
-                loss = criterion(output, target)
-                running_loss += loss.item() * data.size(0)
-                
-                # Metric updates
-                if metrics:
-                    metrics.update(output, target)
-                
-                total_samples += data.size(0)
 
-        # Finalize calculations
-        avg_loss = running_loss / total_samples if total_samples > 0 else 0.0
-        results = {'loss': avg_loss}
-        
-        if metrics:
-            computed = metrics.compute()
-            # Convert tensors to python floats and merge into results
-            results.update({k: v.item() for k, v in computed.items()})
-            metrics.reset()
-            
-        return results
+    def validation_step(self, batch, batch_idx):
+        """
+        Default validation step — subclasses can override for custom metrics.
+        Calls training_step and logs with 'val_' prefix.
+        """
+        loss = self.training_step(batch, batch_idx)
+        self.log("val_loss", loss, prog_bar=True, sync_dist=True)
+        return loss
 
-    def _present_results(self, results):
-        """
-        Handles printing results to the console.
-        """
-        print(f"\n--- Evaluation Results: {self.model_name} ---")
-        for metric, value in results.items():
-            print(f'{metric.upper()}: {value:.3f}')
+    def configure_optimizers(self):
+        """Default: Adam over trainable params. Override for schedulers etc."""
+        return torch.optim.Adam(
+            filter(lambda p: p.requires_grad, self.parameters()),
+            lr=self.learning_rate,
+        )
 
-    def _send_notification(self, results):
-        """
-        Handles formatting and sending the notification via Ntfy.
-        """
-        
+    def initialize_from_checkpoint_or_build(self, checkpoint_path: str, freeze_params=True):
+        """Try loading checkpoint; fall back to building from scratch."""
+        if self._try_load_checkpoint(checkpoint_path):
+            return self
+
+        self._build_model(freeze_params=freeze_params)
+        return self
+
+    def _try_load_checkpoint(self, checkpoint_path: str) -> bool:
+        """Attempt to load weights. Returns True on success."""
+        if not checkpoint_path:
+            return False
+
+        path = Path(checkpoint_path)
+        if not path.exists():
+            return False
+
         try:
-            metrics_msg = NtfyNotificationService.format_metrics_msg(results)
-            self.notifier.send_evaluation_results(metrics_msg)
+            self.load_checkpoint(path)
+            return True
         except Exception as e:
-            print(f"Warning: Failed to send notification: {e}")
+            logger.error(f"Checkpoint load failed for {self.model_name}: {e}")
+            return False
+
+
+    def load_checkpoint(self, checkpoint_path: Path):
+        """Load model weights from a state_dict file."""
+        path = Path(checkpoint_path)
+        if not path.exists():
+            raise FileNotFoundError(f"Checkpoint not found: {path}")
+
+        logger.info(f"Loading weights: {path}")
+        state_dict = torch.load(path, map_location=self.device)
+        self.load_state_dict(state_dict)
+
+    def save_checkpoint_manual(self, filepath: Path):
+        """
+        Manual state_dict save (for YOLO-native training or export).
+        For Lightning-managed training, use ModelCheckpoint callback instead.
+        """
+        filepath = Path(filepath)
+        filepath.parent.mkdir(parents=True, exist_ok=True)
+        torch.save(self.state_dict(), filepath)
+        logger.info(f"Checkpoint saved: {filepath}")
+
+    # ======================== EVALUATION ========================
+
+    def evaluate_model(self, test_loader, metrics: dict = None,
+                       print_results=False, send_notification=False) -> dict:
+        """
+        Run evaluation on test data.
+
+        Note: For standard eval, prefer Lightning's Trainer.test().
+        This method exists for custom metric bundles and notification integration.
+        """
+        results = self._compute_eval_metrics(test_loader, metrics)
+
+        if print_results:
+            self._print_metrics(results)
+
+        if send_notification:
+            self._notify_results(results)
+
+        return results
+
+    def _compute_eval_metrics(self, test_loader, metrics: dict = None) -> dict:
+        """Evaluation loop with optional torchmetrics."""
+        self.eval()
+
+        collection = self._init_metric_collection(metrics)
+        running_loss, n_samples = 0.0, 0
+
+        with torch.no_grad():
+            for batch in test_loader:
+                loss = self.training_step(batch, 0) # Subclass training_step returns loss
+                
+                batch_size = batch[0].size(0) if isinstance(batch, (list, tuple)) else 1
+
+                running_loss += loss.item() * batch_size
+                n_samples += batch_size
+
+                if collection:
+                    data, target = batch[0].to(self.device), batch[1].to(self.device)
+                    output = self(data)
+                    collection.update(output, target)
+
+        results = {"loss": running_loss / max(n_samples, 1)}
+
+        if collection:
+            computed = collection.compute()
+            results.update({k: v.item() for k, v in computed.items()})
+            collection.reset()
+
+        return results
+
+    def _init_metric_collection(self, metrics):
+        """Wrap metrics into MetricCollection on correct device."""
+        if not metrics:
+            return None
+
+        collection = MetricCollection(metrics) if isinstance(metrics, dict) else metrics
+        collection = collection.to(self.device)
+        collection.reset()
+        return collection
+
+    def _notify_results(self, results: dict):
+        try:
+            msg = NtfyNotificationService.format_metrics_msg(results)
+            self.notifier.send_evaluation_results(msg)
+        except Exception as e:
+            logger.warning(f"Notification failed: {e}")
+
+    @staticmethod
+    def _print_metrics(results: dict):
+        for name, value in results.items():
+            print(f"{name.upper()}: {value:.3f}")
+
+
+    def ensure_batch_dim(self, images: torch.Tensor) -> torch.Tensor:
+        """Add batch dimension to a single image tensor."""
+        return images.unsqueeze(0) if images.dim() == 3 else images
+
+    def _get_conv_block(self, in_ch, out_ch, kernel_size=3, activation=None):
+        from .pt_layers.Conv2D_block import Conv2DBlock
+        return Conv2DBlock(in_ch, out_ch, kernel_size, activation or nn.ReLU())
+
+    def _get_dense_block(self, in_features, out_features, activation=None):
+        from .pt_layers.DenseBlock import DenseBlock
+        return DenseBlock(in_features, out_features, activation or nn.ReLU())

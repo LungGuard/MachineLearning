@@ -8,6 +8,7 @@ dependencies = [
     "datasets>=4.4.2",
     "huggingface-hub>=1.2.3",
     "keras-cv>=0.9.0",
+    "lightning>=2.6.1",
     "matplotlib>=3.10.8",
     "monai>=1.5.2",
     "numpy>=2.4.0",
