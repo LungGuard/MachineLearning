@@ -3,7 +3,8 @@
 import time
 from tensorflow.keras.callbacks import Callback  # Changed from keras.callbacks
 from utils.notification_service import NtfyNotificationService
-
+import lightning as L
+import torch
 
 class NotificationCallback(Callback):
     def __init__(self,
@@ -46,3 +47,36 @@ class NotificationCallback(Callback):
             total_epochs=self.total_epochs,
             metrics=self._format_metrics_msg(metrics)
         )
+
+
+class NtfyCallback(L.Callback):
+    """Lightning callback for ntfy.sh training notifications."""
+
+    def __init__(self, notifier ,notify_every_n_epochs: int = 10,notify_on_epoch=False):
+        super().__init__()
+        self.notify_interval = notify_every_n_epochs
+        self.notify_on_epoch=notify_on_epoch
+        self.notifier=notifier
+
+    def on_train_start(self, trainer, pl_module):
+        self.notifier.send_training_start_message()
+
+    def on_train_epoch_end(self, trainer, pl_module):
+        epoch = trainer.current_epoch + 1
+        
+        if self.notify_on_epoch and epoch % self.notify_interval == 0:
+            metrics = self._extract_metrics(trainer)
+            msg = NtfyNotificationService.format_metrics_msg(metrics)
+            self.notifier.send_epoch_update(epoch=epoch, metrics=msg)
+
+    def on_test_end(self, trainer, pl_module):
+        metrics = self._extract_metrics(trainer)
+        clean_metrics = {k.replace("test_", ""): v for k, v in metrics.items()}
+        msg = NtfyNotificationService.format_metrics_msg(clean_metrics)
+        self.notifier.send_evaluation_results(msg)
+
+    def _extract_metrics(self, trainer):
+        return {
+            k: v.item() if torch.is_tensor(v) else v
+            for k, v in trainer.callback_metrics.items()
+        }
