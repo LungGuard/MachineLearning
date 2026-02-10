@@ -1,72 +1,74 @@
-"""
-YOLO-based nodule detection model for LungGuard Stage 1.
-
-Two training modes:
-    1. YOLO-native (via dataset YAML) 
-    2. Custom training (via DataLoader,using lightning)
-
-Mode 1 bypasses the custom training loop entirely (YOLO has its own).
-Mode 2 is using lighting to leverage its benefits benefits (auto device, checkpoints, logging).
-"""
-
 from pathlib import Path
+from typing import Optional, List
 import torch
+import torch.nn as nn
 import pandas as pd
 import logging
-
-from constants.detection.model_constants import DetectionModelConstants, YoloVariant
-from utils.base_pt_cnn_model import BaseCNNModel
 from ultralytics import YOLO
-import lightning as L
+import numpy as np
+from torchvision.transforms.functional import to_tensor
+from constants.detection.model_constants import DetectionModelConstants as ModelConstants, YoloVariant
+from constants.common.metrics_constants import Metrics
+from constants.common.model_stages import ModelStage
+from utils.base_pt_cnn_model import BaseCNNModel
+
 
 logger = logging.getLogger(__name__)
 
 
 class NodulesDetectionModel(BaseCNNModel):
     """
-    Usage (YOLO-native):
-        model = NodulesDetectionModel()
-        model.set_dataset_config("data.yaml")
-        history = model.train_yolo_native(epochs=100)
-
-    Usage (Lightning):
-        model = NodulesDetectionModel()
-        trainer = L.Trainer(max_epochs=100, callbacks=[...])
-        trainer.fit(model, train_loader, val_loader)
+    YOLO-based nodule detection for LungGuard Stage 1.
+    
+    Two training modes:
+        1. YOLO-native: model.train_yolo_native() — uses Ultralytics trainer
+        2. Lightning:   trainer.fit(model, loader) — uses Lightning loop
     """
 
-    def __init__(self, checkpoint_path=None, input_shape=(3, 640, 640),
-                 learning_rate=None):
-        super().__init__(
-            input_shape=input_shape,
-            model_name=DetectionModelConstants.MODEL_NAME,
-            learning_rate=learning_rate or DetectionModelConstants.LEARNING_RATE,
-        )
+    NODULE_CLASS_COUNT = 1
 
-        self.num_classes = 1
+    def __init__(self, 
+                 input_shape: tuple =ModelConstants.DEFAULT_INPUT_SIZE,
+                 learning_rate: float = None,
+                 additional_layers = None,
+                 freeze_backbone: bool = True,
+                 **kwargs):
+
+        self.additional_layers = additional_layers or []
+        self.should_freeze_backbone = freeze_backbone
         self.yolo_model = None
         self.data_yaml_path = None
 
-        self.initialize_from_checkpoint_or_build(
-            checkpoint_path or "", freeze_params=True
+        super().__init__(
+            input_shape=input_shape,
+            model_name=ModelConstants.MODEL_NAME,
+            num_classes=self.NODULE_CLASS_COUNT,
+            learning_rate=learning_rate or ModelConstants.LEARNING_RATE,
+            metrics=None,
+            **kwargs
         )
 
-    def _build_model(self, freeze_params=True, additional_layers=None):
-        """A method to build the yolo as the backbone and add additional layers if provided"""
+    # ======================== MODEL BUILDING ========================
+
+    def _build_model(self):
         self.yolo_model = YOLO(YoloVariant.YOLO_LARGE.preset)
+        
+        self._apply_backbone_freeze()
+        self._apply_additional_layers()
 
-        if freeze_params:
-            self.freeze_backbone()
+    def _apply_backbone_freeze(self):
+        if self.should_freeze_backbone:
+            self._set_backbone_grad(requires_grad=False)
 
-        if additional_layers:
-            self.features.extend(additional_layers)
+    def _apply_additional_layers(self):
+        self.features.extend(self.additional_layers)
+        layer_count = len(self.additional_layers)
+        extra_msg = f" + {layer_count} custom layers" if layer_count > 0 else ""
+        logger.info(f"Built: YOLO-{YoloVariant.YOLO_LARGE.preset}{extra_msg}")
 
-        extra = f" + {len(additional_layers)} custom layers" if additional_layers else ""
-        logger.info(f"Built: YOLO {YoloVariant.YOLO_LARGE.preset}{extra}")
-        return self
+    # ======================== FORWARD ========================
 
     def forward(self, x):
-        """Forward through YOLO backbone, then any additional layers."""
         out = self.yolo_model.model(x)
 
         for layer in self.features:
@@ -74,165 +76,156 @@ class NodulesDetectionModel(BaseCNNModel):
 
         return out
 
-    def forward_features(self, x):
-        """
-        Forward through YOLO backbone ONLY (no detection head).
-        Returns raw feature maps — use this if your additional layers
-        need standard (B, C, H, W) tensors.
+    # ======================== LIGHTNING TRAINING ========================
 
-        Useful for building custom heads on top of YOLO features.
-        """
-        return self.yolo_model.model.model[:10](x) 
-
-    def training_step(self, batch, batch_idx) -> torch.Tensor:
-        """
-        training step for custom DataLoader mode.
-        Auto-handles zero_grad, backward, optimizer step.
-        """
-        images, labels = batch
-        raw_output = self.forward(images)
-        loss = self.yolo_model.model.loss(raw_output, labels)
-
-        # YOLO loss may return non-tensor in some edge cases
-        if not torch.is_tensor(loss):
-            loss = torch.tensor(loss, device=self.device, requires_grad=True)
-
-        self.log("train_loss", loss, prog_bar=True)
+    def training_step(self, batch, batch_idx):
+        loss = self._compute_detection_loss(batch)
+        self.log(Metrics.DEFAULT_METRIC_LOSS.get_model_stage_metric(ModelStage.TRAIN), loss, prog_bar=True)
         return loss
 
     def validation_step(self, batch, batch_idx):
-        """Lightning validation step."""
-        images, labels = batch
+        loss = self._compute_detection_loss(batch)
+        self.log(Metrics.DEFAULT_METRIC_LOSS.get_model_stage_metric(ModelStage.VAL), loss, prog_bar=True, sync_dist=True)
+
+    def _compute_detection_loss(self, batch):
+        images, targets = batch
         raw_output = self.forward(images)
-        loss = self.yolo_model.model.loss(raw_output, labels)
+        return self.yolo_model.model.loss(raw_output, targets)
 
-        if not torch.is_tensor(loss):
-            loss = torch.tensor(loss, device=self.device)
-
-        self.log("val_loss", loss, prog_bar=True, sync_dist=True)
-        return loss
-
+    # ======================== YOLO-NATIVE TRAINING ========================
 
     def set_dataset_config(self, yaml_path: str):
-        """Set and validate YOLO dataset YAML path."""
         path = Path(yaml_path)
+        
         if not path.exists():
             raise FileNotFoundError(f"Dataset config not found: {yaml_path}")
-
+        
         self.data_yaml_path = path
-        logger.info(f"Dataset config: {path}")
         return self
 
-    def train_yolo_native(self, epochs=100, learning_rate=None,
+    def train_yolo_native(self, epochs=100, learning_rate=None, 
                           data_yaml=None, callbacks=None) -> dict:
-        """
-        Train using YOLO's built-in trainer (bypasses Lightning).
-
-        Use this when you have a YOLO-format dataset YAML.
-        For custom DataLoaders, use Lightning's Trainer.fit() instead.
-        """
         config = data_yaml or self.data_yaml_path
+        
         if not config:
             raise ValueError("No dataset config. Call set_dataset_config() first.")
 
-        logger.info(f"YOLO-native training | config: {config}")
+        training_args = self._build_native_training_args(config, epochs, learning_rate)
 
-        args = {
-            "data": str(config),
-            "epochs": epochs,
-            "imgsz": self.width,
-            "batch": DetectionModelConstants.BATCH_SIZE,
-            "device": "cuda" if torch.cuda.is_available() else "cpu",
-            "project": "checkpoints",
-            "name": self.model_name,
-            "exist_ok": True,
-            "verbose": True,
-        }
-
-        if learning_rate:
-            args["lr0"] = learning_rate
-
-        results = self.yolo_model.train(**args)
-        logger.info("YOLO-native training completed")
-
+        logger.info("Starting YOLO-native training...")
+        results = self.yolo_model.train(**training_args)
+        
         history = self._parse_yolo_results(results)
-        self._replay_callbacks(callbacks, history)
+        self._replay_callbacks(callbacks or [], history)
         return history
 
+    def _build_native_training_args(self, config, epochs, learning_rate):
+        NativeTrainingArgs=ModelConstants.NativeTrainingArgs
+        args = {
+            NativeTrainingArgs.DATA_ARG_NAME: str(config),
+            NativeTrainingArgs.EPOCHS_ARG_NAME: epochs,
+            NativeTrainingArgs.IMAGES_ARG_NAME: self.width,
+            NativeTrainingArgs.BATCH_ARG_NAME: ModelConstants.BATCH_SIZE,
+            NativeTrainingArgs.DEVICE_ARG_NAME: "cuda" if torch.cuda.is_available() else "cpu",
+            NativeTrainingArgs.PROJECT_ARG_NAME: "checkpoints",
+            NativeTrainingArgs.MODEL_NAME_ARG_NAME: self.model_name,
+            NativeTrainingArgs.EXIST_OK_ARG_NAME: True,
+            NativeTrainingArgs.VERBOSE_ARG_NAME: True,
+        }
+        
+        if learning_rate:
+            args[NativeTrainingArgs.LR0_ARG_NAME] = learning_rate
+
+        return args
+
     def _parse_yolo_results(self, yolo_results) -> dict:
-        """Convert YOLO results.csv → standard history dict."""
         csv_path = Path(yolo_results.save_dir) / "results.csv"
+        empty_history = {Metrics.DEFAULT_METRIC_LOSS.get_metric_variant(ModelStage.TRAIN): [],
+                         Metrics.DEFAULT_METRIC_LOSS.get_metric_variant(ModelStage.VAL): []}
+        
+        has_csv = csv_path.exists()
+        df = pd.read_csv(csv_path) if has_csv else None
+        
+        result = empty_history
+        
+        parsed = self._extract_loss_columns(df) if has_csv else empty_history
+        result = parsed if has_csv else result
+        return result
 
-        if not csv_path.exists():
-            logger.warning("results.csv not found — empty history")
-            return {"train_loss": [], "val_loss": []}
-
-        df = pd.read_csv(csv_path)
-        cols = set(df.columns)
-
+    def _extract_loss_columns(self, df):
+        df.columns = [col.strip() for col in df.columns]
+        train_col = f"train/{Metrics.DEFAULT_METRIC_LOSS.get_metric_variant("box")}"
+        val_col = f"val/{Metrics.DEFAULT_METRIC_LOSS.get_metric_variant("box")}"
+        
         return {
-            "train_loss": df["train/box_loss"].tolist() if "train/box_loss" in cols else [],
-            "val_loss": df["val/box_loss"].tolist() if "val/box_loss" in cols else [],
-            "train_obj_loss": df["train/obj_loss"].tolist() if "train/obj_loss" in cols else [],
-            "val_obj_loss": df["val/obj_loss"].tolist() if "val/obj_loss" in cols else [],
-            "all_metrics": df.to_dict("list"),
+            Metrics.DEFAULT_METRIC_LOSS.get_metric_variant(ModelStage.TRAIN): df[train_col].tolist() if train_col in df.columns else [],
+            Metrics.DEFAULT_METRIC_LOSS.get_metric_variant(ModelStage.VAL): df[val_col].tolist() if val_col in df.columns else [],
         }
 
     def _replay_callbacks(self, callbacks, history):
-        """Replay callbacks epoch-by-epoch from saved YOLO history."""
-        if not callbacks:
-            return
+        train_losses = history.get(Metrics.DEFAULT_METRIC_LOSS.get_metric_variant(ModelStage.TRAIN), [])
+        val_losses = history.get(Metrics.DEFAULT_METRIC_LOSS.get_metric_variant(ModelStage.VAL), [])
+        epoch_count = len(train_losses)
 
-        for epoch in range(len(history.get("train_loss", []))):
-            train_m = {"loss": history["train_loss"][epoch]}
-            val_loss = history["val_loss"][epoch] if history["val_loss"] else 0.0
-            val_m = {"loss": val_loss}
+        for epoch_idx in range(epoch_count):
+            train_metrics = {Metrics.DEFAULT_METRIC_LOSS.value : train_losses[epoch_idx]}
+            val_metrics = {Metrics.DEFAULT_METRIC_LOSS.value : val_losses[epoch_idx] if epoch_idx < len(val_losses) else 0}
+            
+            for callback in filter(callable, callbacks):
+                callback(epoch_idx, train_metrics, val_metrics)
 
-            for cb in callbacks:
-                cb(epoch, train_m, val_m)
+    # ======================== BACKBONE CONTROL ========================
+
+    def freeze_backbone(self):
+        self._set_backbone_grad(requires_grad=False)
+        logger.info("YOLO backbone frozen")
+
+    def unfreeze_backbone(self):
+        self._set_backbone_grad(requires_grad=True)
+        logger.info("YOLO backbone unfrozen")
+
+    def _set_backbone_grad(self, requires_grad: bool):
+        for param in self.yolo_model.model.parameters():
+            param.requires_grad = requires_grad
 
     # ======================== INFERENCE ========================
 
-    def predict(self, images, confidence_threshold=0.25) -> dict:
-        """
-        Detect nodules with confidence filtering.
-
-        """
+    def predict(self, images, confidence_threshold=ModelConstants.DEFAULT_CONFIDENCE_THRESHOLD) -> dict:
         self.eval()
-        tensor = self.ensure_batch_dim(images).to(self.device)
+        
+        Results=ModelConstants.Results
 
-        with torch.no_grad():
-            raw = self.forward(tensor)
+        has_additional_layers = len(self.features) > 0
+        
+        if has_additional_layers:
+            tensor_input = self._to_tensor(images)
+            backbone_output = self.yolo_model.model(tensor_input)
+            
+            for layer in self.features:
+                backbone_output = layer(backbone_output)
+            
+            results = self.yolo_model.predict(backbone_output, conf=confidence_threshold, verbose=False)
+        else:
+            results = self.yolo_model(images, conf=confidence_threshold, verbose=False)
 
-        boxes, scores = self._filter_detections(raw, confidence_threshold)
+        first_result = results[0]
+        boxes = first_result.boxes.xyxy.cpu().numpy().tolist()
+        scores = first_result.boxes.conf.cpu().numpy().tolist()
 
         return {
-            "bounding_boxes": boxes,
-            "confidence_scores": scores,
-            "num_nodules": len(boxes),
+            Results.BOUNDING_BOXES_KEY: boxes,
+            Results.CONFIDENCE_SCORES_KEY: scores,
+            Results.NODULES_COUNT: len(boxes),
         }
 
-    def _filter_detections(self, yolo_output, threshold: float):
-        """Extract boxes + scores above confidence threshold."""
-        result = yolo_output[0] if isinstance(yolo_output, (list, tuple)) else yolo_output
-
-        boxes = result.boxes.xyxy.cpu().numpy()
-        scores = result.boxes.conf.cpu().numpy()
-
-        mask = scores >= threshold
-        return boxes[mask].tolist(), scores[mask].tolist()
+    def _to_tensor(self, images):
+        if isinstance(images, torch.Tensor):
+            tensor = images
+            if tensor.dim() == 3:
+                tensor = tensor.unsqueeze(0)
+            return tensor.to(self.device)
 
 
-    def freeze_backbone(self):
-        """Freeze YOLO backbone (for transfer learning)."""
-        for p in self.yolo_model.model.parameters():
-            p.requires_grad = False
-        logger.info("YOLO backbone frozen")
-        return self
-
-    def unfreeze_backbone(self):
-        """Unfreeze YOLO backbone (for fine-tuning)."""
-        for p in self.yolo_model.model.parameters():
-            p.requires_grad = True
-        logger.info("YOLO backbone unfrozen")
-        return self
+        is_numpy = isinstance(images, np.ndarray)
+        tensor = to_tensor(images) if is_numpy else to_tensor(np.array(images))
+        return tensor.unsqueeze(0).to(self.device)

@@ -2,187 +2,177 @@ import torch
 import torch.nn as nn
 import lightning as L
 from pathlib import Path
-from torchmetrics import MetricCollection
+from torchmetrics import MetricCollection, Accuracy
 from utils.notification_service import NtfyNotificationService
+from constants.base_model_constants import BaseModelConstants
+from constants.common.metrics_constants import Metrics
+from constants.common.model_stages import ModelStage
 import logging
+
+from .pt_layers.Conv2D_block import Conv2DBlock
+from .pt_layers.DenseBlock import DenseBlock
+
 
 logger = logging.getLogger(__name__)
 
 
 class BaseCNNModel(L.LightningModule):
-    """
-    Abstract base for all LungGuard CNN models.
-    """
 
-    def __init__(self, input_shape: tuple, model_name: str, learning_rate: float = 1e-3):
+    """Base class for all CNN models"""
+
+    def __init__(self, 
+                 input_shape: tuple, 
+                 model_name: str, 
+                 num_classes: int,
+                 learning_rate: float =BaseModelConstants.DEFAULT_LEARNING_RATE,
+                 loss_fn: nn.Module = None,
+                 metrics=None,
+                 optimizer_cls=BaseModelConstants.DEFAULT_OPTIMIZER,
+                 additional_optimizers=None,
+                 callbacks=None):
+        
         super().__init__()
-
-        self.save_hyperparameters()  # auto-saves init args for checkpoint reload
+        self.save_hyperparameters(ignore=[
+            BaseModelConstants.METRICS_HYPERPARAMETER, 
+            BaseModelConstants.CALLBACKS_HYPERPARAMETER
+        ])
 
         self.model_name = model_name
         self.channels, self.height, self.width = input_shape
         self.learning_rate = learning_rate
-
+        self.num_classes = num_classes
+        self.loss_fn = loss_fn or nn.CrossEntropyLoss()
+        self.optimizer_cls = optimizer_cls
+        self.additional_optimizers = additional_optimizers or {}
+        self.custom_callbacks = callbacks or []
+        self.notifier = NtfyNotificationService(model_name=self.model_name)
         self.features = nn.ModuleList()
-        self.notifier = NtfyNotificationService(model_name=model_name)
 
-    def _build_model(self, freeze_params=True, **kwargs):
-        """Subclasses build their architecture here."""
+        self._build_model()
+        self._setup_metrics(metrics)
+
+    # ======================== ABSTRACT ========================
+
+    def _build_model(self):
         raise NotImplementedError
 
     def forward(self, x):
-        """Subclasses define forward pass."""
         raise NotImplementedError
 
-    def training_step(self, batch, batch_idx) -> torch.Tensor:
-        """
-        Subclasses compute and return loss for one batch.
-        """
-        raise NotImplementedError
+    # ======================== METRICS ========================
 
+    def _setup_metrics(self, metrics):
+        collection = self._create_metric_collection(metrics)
+        self.train_metrics = collection.clone(prefix=ModelStage.TRAIN.prefix)
+        self.val_metrics = collection.clone(prefix=ModelStage.VAL.prefix)
+        self.test_metrics = collection.clone(prefix=ModelStage.TEST.prefix)
 
-    def validation_step(self, batch, batch_idx):
-        """
-        Default validation step — subclasses can override for custom metrics.
-        Calls training_step and logs with 'val_' prefix.
-        """
-        loss = self.training_step(batch, batch_idx)
-        self.log("val_loss", loss, prog_bar=True, sync_dist=True)
-        return loss
+    def _create_metric_collection(self, metrics):
+        
+        is_none = metrics is None
+    
+        default_metrics = MetricCollection({
+            Metrics.METRIC_ACCURACY.value: Accuracy(
+                task=BaseModelConstants.DEFAULT_METRICS_TASK, 
+                num_classes=self.num_classes
+            )
+        })
+
+        is_dict = isinstance(metrics, dict)
+        result = default_metrics
+        result = MetricCollection(metrics) if is_dict else result
+        result = default_metrics if is_none else result
+        return result
+
+    # ======================== OPTIMIZER ========================
 
     def configure_optimizers(self):
-        """Default: Adam over trainable params. Override for schedulers etc."""
-        return torch.optim.Adam(
-            filter(lambda p: p.requires_grad, self.parameters()),
-            lr=self.learning_rate,
+        return self.optimizer_cls(
+            self.parameters(), 
+            lr=self.learning_rate, 
+            **self.additional_optimizers
         )
 
-    def initialize_from_checkpoint_or_build(self, checkpoint_path: str, freeze_params=True):
-        """Try loading checkpoint; fall back to building from scratch."""
-        if self._try_load_checkpoint(checkpoint_path):
-            return self
+    def configure_callbacks(self):
+        return self.custom_callbacks
 
-        self._build_model(freeze_params=freeze_params)
-        return self
+    # ======================== SHARED STEP LOGIC ========================
 
-    def _try_load_checkpoint(self, checkpoint_path: str) -> bool:
-        """Attempt to load weights. Returns True on success."""
-        if not checkpoint_path:
-            return False
+    def _compute_step(self, batch):
+        x, y = batch
+        logits = self(x)
+        loss = self.loss_fn(logits, y)
+        preds = torch.argmax(logits, dim=1)
+        return loss, preds, y
 
-        path = Path(checkpoint_path)
-        if not path.exists():
-            return False
+    # ======================== TRAINING ========================
 
-        try:
-            self.load_checkpoint(path)
-            return True
-        except Exception as e:
-            logger.error(f"Checkpoint load failed for {self.model_name}: {e}")
-            return False
+    def training_step(self, batch, batch_idx):
+        loss, preds, targets = self._compute_step(batch)
+        self.train_metrics.update(preds, targets)
+        self.log(Metrics.DEFAULT_METRIC_LOSS.get_metric_variant(ModelStage.TRAIN), loss, on_step=True, on_epoch=True, prog_bar=True)
+        self.log_dict(self.train_metrics, on_step=False, on_epoch=True, prog_bar=True)
+        return loss
 
+    # ======================== VALIDATION ========================
 
-    def load_checkpoint(self, checkpoint_path: Path):
-        """Load model weights from a state_dict file."""
-        path = Path(checkpoint_path)
-        if not path.exists():
-            raise FileNotFoundError(f"Checkpoint not found: {path}")
+    def validation_step(self, batch, batch_idx):
+        loss, preds, targets = self._compute_step(batch)
+        self.val_metrics.update(preds, targets)
+        self.log(Metrics.DEFAULT_METRIC_LOSS.get_metric_variant(ModelStage.VAL), loss, prog_bar=True)
+        self.log_dict(self.val_metrics, on_step=False, on_epoch=True, prog_bar=True)
 
-        logger.info(f"Loading weights: {path}")
-        state_dict = torch.load(path, map_location=self.device)
-        self.load_state_dict(state_dict)
+    # ======================== TEST ========================
 
-    def save_checkpoint_manual(self, filepath: Path):
-        """
-        Manual state_dict save (for YOLO-native training or export).
-        For Lightning-managed training, use ModelCheckpoint callback instead.
-        """
-        filepath = Path(filepath)
-        filepath.parent.mkdir(parents=True, exist_ok=True)
-        torch.save(self.state_dict(), filepath)
-        logger.info(f"Checkpoint saved: {filepath}")
-
+    def test_step(self, batch, batch_idx):
+        loss, preds, targets = self._compute_step(batch)
+        self.test_metrics.update(preds, targets)
+        self.log(Metrics.DEFAULT_METRIC_LOSS.get_metric_variant(ModelStage.TEST), loss)
+        self.log_dict(self.test_metrics, on_step=False, on_epoch=True)
+    
     # ======================== EVALUATION ========================
+    def eval_model(self, dataloader, trainer=None, notify=True) -> dict:
+        active_trainer = trainer or L.Trainer(
+            accelerator=BaseModelConstants.EVAL_TRAINER_ACCELERATOR_MODE,
+            logger=False,
+        )
 
-    def evaluate_model(self, test_loader, metrics: dict = None,
-                       print_results=False, send_notification=False) -> dict:
-        """
-        Run evaluation on test data.
+        test_results = active_trainer.test(self, dataloaders=dataloader, verbose=True)
+        
+        results = test_results[0] if test_results else {}
 
-        Note: For standard eval, prefer Lightning's Trainer.test().
-        This method exists for custom metric bundles and notification integration.
-        """
-        results = self._compute_eval_metrics(test_loader, metrics)
-
-        if print_results:
-            self._print_metrics(results)
-
-        if send_notification:
+        if notify:
             self._notify_results(results)
 
         return results
 
-    def _compute_eval_metrics(self, test_loader, metrics: dict = None) -> dict:
-        """Evaluation loop with optional torchmetrics."""
-        self.eval()
-
-        collection = self._init_metric_collection(metrics)
-        running_loss, n_samples = 0.0, 0
-
-        with torch.no_grad():
-            for batch in test_loader:
-                loss = self.training_step(batch, 0) # Subclass training_step returns loss
-                
-                batch_size = batch[0].size(0) if isinstance(batch, (list, tuple)) else 1
-
-                running_loss += loss.item() * batch_size
-                n_samples += batch_size
-
-                if collection:
-                    data, target = batch[0].to(self.device), batch[1].to(self.device)
-                    output = self(data)
-                    collection.update(output, target)
-
-        results = {"loss": running_loss / max(n_samples, 1)}
-
-        if collection:
-            computed = collection.compute()
-            results.update({k: v.item() for k, v in computed.items()})
-            collection.reset()
-
-        return results
-
-    def _init_metric_collection(self, metrics):
-        """Wrap metrics into MetricCollection on correct device."""
-        if not metrics:
-            return None
-
-        collection = MetricCollection(metrics) if isinstance(metrics, dict) else metrics
-        collection = collection.to(self.device)
-        collection.reset()
-        return collection
-
     def _notify_results(self, results: dict):
         try:
-            msg = NtfyNotificationService.format_metrics_msg(results)
+            clean_results = {k.replace(ModelStage.TEST.prefix, ""): v for k, v in results.items()}
+            msg = NtfyNotificationService.format_metrics_msg(clean_results)
             self.notifier.send_evaluation_results(msg)
         except Exception as e:
             logger.warning(f"Notification failed: {e}")
 
-    @staticmethod
-    def _print_metrics(results: dict):
-        for name, value in results.items():
-            print(f"{name.upper()}: {value:.3f}")
+    # ======================== LOADING ========================
 
+    @classmethod
+    def load_or_build(cls, checkpoint_path: str = None, **kwargs):
+        has_checkpoint = checkpoint_path and Path(checkpoint_path).exists()
+        
+        loaded_model = cls.load_from_checkpoint(
+            checkpoint_path, strict=False, **kwargs
+        ) if has_checkpoint else None
 
-    def ensure_batch_dim(self, images: torch.Tensor) -> torch.Tensor:
-        """Add batch dimension to a single image tensor."""
-        return images.unsqueeze(0) if images.dim() == 3 else images
+        result = loaded_model or cls(**kwargs)
+        
+        log_msg = f"Loaded checkpoint: {checkpoint_path}" if has_checkpoint else "Built new model"
+        logger.info(log_msg)
+        return result
 
-    def _get_conv_block(self, in_ch, out_ch, kernel_size=3, activation=None):
-        from .pt_layers.Conv2D_block import Conv2DBlock
-        return Conv2DBlock(in_ch, out_ch, kernel_size, activation or nn.ReLU())
+    def _get_conv_block(self, in_channels, out_channels, kernel_size=3):
+        return Conv2DBlock(in_channels, out_channels, kernel_size, nn.ReLU())
 
-    def _get_dense_block(self, in_features, out_features, activation=None):
-        from .pt_layers.DenseBlock import DenseBlock
-        return DenseBlock(in_features, out_features, activation or nn.ReLU())
+    def _get_dense_block(self, in_features, out_features):
+        return DenseBlock(in_features, out_features, nn.ReLU())
+    

@@ -50,7 +50,7 @@ class NtfyNotificationService:
     
     def send_training_end_message(self, metrics, duration):
         return self.send_message(
-            msg=f"Model: {self.model_name}\nDuration: {duration:.1f} min\n\n{metrics}",
+            msg=f"Model: {self.model_name}\nTraining Duration: {duration:.1f} min\n\n{metrics}",
             title=NotificationFields.TRAINING_COMPLETED_TITLE,
             priority=NotificationPriority.HIGH,
             tags=[NotificationTags.COMPLETE, NotificationTags.SUCCESS]
