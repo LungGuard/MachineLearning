@@ -2,23 +2,49 @@ import cv2
 import numpy as np
 import pandas as pd
 from pathlib import Path
-from typing import Dict, List, Tuple, Optional, Set, Union
+from typing import Dict, List, Tuple, Optional, Set
 from dataclasses import dataclass, field
 import re
 import logging
 import shutil
+import time
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
+from rich.console import Console
+from rich.table import Table
+from rich.panel import Panel
+from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn, TimeElapsedColumn, MofNCompleteColumn
+from rich.text import Text
+from rich.prompt import Prompt, Confirm
+from rich import box
+
+console = Console()
+
+logging.basicConfig(level=logging.WARNING, format='%(asctime)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+
+# ──────────────────────────────────────────────
+# Configuration
+# ──────────────────────────────────────────────
 
 @dataclass
 class AnalysisThresholds:
     """Thresholds for image quality analysis."""
+    # Generic quality
     uniform_std: float = 10.0
     too_dark_ratio: float = 0.95
     too_bright_mean: float = 180.0
     min_dark_ratio: float = 0.20
     min_contrast_range: int = 100
+
+    # Lung content
+    body_intensity_floor: int = 20
+    lung_intensity_range: Tuple[int, int] = (10, 90)
+    morph_kernel_size: int = 15
+    min_lung_contour_area: int = 500
+    min_lung_body_ratio: float = 0.12
+    min_body_ratio: float = 0.15
+
 
 @dataclass
 class ImageAnalysisResult:
@@ -27,257 +53,598 @@ class ImageAnalysisResult:
     filename: str
     split: str = "unknown"
     metadata: Dict = field(default_factory=dict)
-    
+
     # Statistics
     mean: float = 0.0
     std: float = 0.0
     min_val: int = 0
     max_val: int = 0
-    
-    # Ratios
+
+    # Pixel distribution
     dark_pixel_ratio: float = 0.0
     mid_pixel_ratio: float = 0.0
     bright_pixel_ratio: float = 0.0
-    
-    # Diagnosis
+
+    # Lung content metrics
+    body_ratio: float = 0.0
+    lung_body_ratio: float = 0.0
+    lung_region_count: int = 0
+
+    # Diagnosis flags
     is_uniform: bool = False
     is_too_dark: bool = False
     is_too_bright: bool = False
     is_missing_contrast: bool = False
     has_no_dark_background: bool = False
-    
+    has_insufficient_lung: bool = False
+
     # Verdict
     is_problematic: bool = False
     problem_type: str = "OK"
 
 
+# ──────────────────────────────────────────────
+# Terminal Display
+# ──────────────────────────────────────────────
+
+class DiagnoserDisplay:
+    """Handles all rich terminal output for the diagnoser."""
+
+    PROBLEM_STYLES = {
+        "UNIFORM": ("⬜", "dim"),
+        "TOO_DARK": ("🌑", "bright_black"),
+        "TOO_BRIGHT": ("☀️", "yellow"),
+        "LOW_CONTRAST": ("🔲", "grey50"),
+        "NO_BG": ("🖼️", "magenta"),
+        "INSUFFICIENT_LUNG": ("🫁", "red"),
+        "UNREADABLE": ("❌", "bold red"),
+    }
+
+    @staticmethod
+    def print_banner() -> None:
+        banner = Text()
+        banner.append("╔══════════════════════════════════════════════╗\n", style="cyan")
+        banner.append("║       ", style="cyan")
+        banner.append("🫁  LungGuard Dataset Diagnoser", style="bold white")
+        banner.append("       ║\n", style="cyan")
+        banner.append("║  ", style="cyan")
+        banner.append("   CT Image Quality & Lung Content Analyzer  ", style="dim white")
+        banner.append("║\n", style="cyan")
+        banner.append("╚══════════════════════════════════════════════╝", style="cyan")
+        console.print(banner)
+        console.print()
+
+    @staticmethod
+    def print_thresholds(t: AnalysisThresholds) -> None:
+        table = Table(
+            title="⚙️  Active Thresholds",
+            box=box.ROUNDED, title_style="bold cyan",
+            show_header=True, header_style="bold",
+            padding=(0, 1),
+        )
+        table.add_column("Parameter", style="white")
+        table.add_column("Value", style="green", justify="right")
+        table.add_column("Description", style="dim")
+
+        table.add_row("min_lung_body_ratio", f"{t.min_lung_body_ratio:.2f}", "Min lung-to-body area ratio")
+        table.add_row("lung_intensity_range", f"{t.lung_intensity_range}", "Pixel range for lung tissue")
+        table.add_row("uniform_std", f"{t.uniform_std:.1f}", "Max std for uniform detection")
+        table.add_row("too_dark_ratio", f"{t.too_dark_ratio:.2f}", "Dark pixel ratio threshold")
+        table.add_row("too_bright_mean", f"{t.too_bright_mean:.1f}", "Mean brightness threshold")
+        table.add_row("min_contrast_range", f"{t.min_contrast_range}", "Min pixel range for contrast")
+
+        console.print(table)
+        console.print()
+
+    @staticmethod
+    def create_progress() -> Progress:
+        return Progress(
+            SpinnerColumn("dots", style="cyan"),
+            TextColumn("[bold blue]{task.description}"),
+            BarColumn(bar_width=40, style="cyan", complete_style="green", finished_style="bold green"),
+            MofNCompleteColumn(),
+            TextColumn("•"),
+            TimeElapsedColumn(),
+            console=console,
+        )
+
+    @classmethod
+    def print_summary(cls, summary: Dict, df: pd.DataFrame) -> None:
+        total = summary["total_images"]
+        prob = summary["problematic_count"]
+        ratio = summary["problematic_ratio"]
+        clean = total - prob
+
+        health = cls._compute_health_grade(ratio)
+
+        stats_text = Text()
+        stats_text.append(f"  Total Images:       ", style="dim")
+        stats_text.append(f"{total:,}\n", style="bold white")
+        stats_text.append(f"  ✅ Clean:            ", style="dim")
+        stats_text.append(f"{clean:,}\n", style="bold green")
+        stats_text.append(f"  ❌ Problematic:      ", style="dim")
+        stats_text.append(f"{prob:,}", style="bold red")
+        stats_text.append(f"  ({ratio:.1%})\n", style="dim red")
+        stats_text.append(f"\n  Dataset Health:     ", style="dim")
+        stats_text.append(f"{health}\n", style="bold")
+
+        console.print(Panel(stats_text, title="📊 Analysis Summary", border_style="cyan", box=box.ROUNDED))
+
+        # Lung stats
+        lung = summary.get("lung_stats", {})
+        lung_table = Table(box=box.SIMPLE_HEAD, show_edge=False, padding=(0, 2))
+        lung_table.add_column("Metric", style="white")
+        lung_table.add_column("Value", style="cyan", justify="right")
+
+        lung_table.add_row("Mean Lung/Body Ratio", f"{lung.get('mean_lung_body_ratio', 0):.3f}")
+        lung_table.add_row("Median Lung/Body Ratio", f"{lung.get('median_lung_body_ratio', 0):.3f}")
+        lung_table.add_row("Min Lung/Body Ratio", f"{lung.get('min_lung_body_ratio', 0):.3f}")
+        lung_table.add_row("Flagged Insufficient Lung", f"{lung.get('flagged_insufficient_lung', 0):,}")
+
+        console.print(Panel(lung_table, title="🫁 Lung Content Analysis", border_style="blue", box=box.ROUNDED))
+
+        breakdown = summary.get("problem_breakdown", {})
+        cls._print_problem_breakdown(breakdown) if breakdown else None
+
+        splits = summary.get("split_breakdown", {})
+        cls._print_split_breakdown(splits) if splits else None
+
+    @classmethod
+    def _print_problem_breakdown(cls, breakdown: Dict) -> None:
+        table = Table(
+            title="🔍 Problem Breakdown",
+            box=box.ROUNDED, title_style="bold yellow",
+            show_header=True, header_style="bold",
+        )
+        table.add_column("", width=3)
+        table.add_column("Problem Type", style="white")
+        table.add_column("Count", justify="right", style="red")
+        table.add_column("Bar", width=25)
+
+        max_count = max(breakdown.values()) if breakdown else 1
+        for problem_type, count in sorted(breakdown.items(), key=lambda x: -x[1]):
+            first_type = problem_type.split(";")[0].strip()
+            icon, _ = cls.PROBLEM_STYLES.get(first_type, ("⚠️", "yellow"))
+            bar_len = int((count / max_count) * 20)
+            bar = f"[red]{'█' * bar_len}[/red][dim]{'░' * (20 - bar_len)}[/dim]"
+            table.add_row(icon, problem_type, str(count), bar)
+
+        console.print(table)
+
+    @staticmethod
+    def _print_split_breakdown(splits: Dict) -> None:
+        table = Table(
+            title="📂 Split Breakdown",
+            box=box.ROUNDED, title_style="bold green",
+            show_header=True, header_style="bold",
+        )
+        table.add_column("Split", style="cyan")
+        table.add_column("Total", justify="right")
+        table.add_column("Problematic", justify="right", style="red")
+        table.add_column("Clean", justify="right", style="green")
+        table.add_column("Health", justify="right")
+
+        for split_name, info in splits.items():
+            total = info["total"]
+            prob = info["problematic"]
+            clean_count = total - prob
+            ratio = info["ratio"]
+            health_icon = "🟢" if ratio < 0.05 else ("🟡" if ratio < 0.15 else "🔴")
+            table.add_row(split_name, str(total), str(prob), str(clean_count), f"{health_icon} {1 - ratio:.1%}")
+
+        console.print(table)
+
+    @staticmethod
+    def print_verification(report: Dict) -> None:
+        is_clean = report.get("is_clean", False)
+        status_text = "✅ PASS — Dataset is clean!" if is_clean else "❌ FAIL — Problematic images remain"
+
+        text = Text()
+        text.append(f"  Path:             ", style="dim")
+        text.append(f"{report['dataset_path']}\n", style="white")
+        text.append(f"  Total Images:     ", style="dim")
+        text.append(f"{report['total_images']:,}\n", style="white")
+        text.append(f"  Remaining Issues: ", style="dim")
+        text.append(f"{report['problematic_remaining']:,}\n", style="red" if report['problematic_remaining'] else "green")
+        text.append(f"\n  Result:           ", style="dim")
+        text.append(status_text, style="bold green" if is_clean else "bold red")
+        text.append("\n")
+
+        integrity = report.get("nodule_integrity", {})
+        nod_status = integrity.get("status", "SKIP")
+        nod_style = {"PASS": "green", "FAIL": "red", "SKIP": "yellow"}.get(nod_status, "yellow")
+
+        text.append(f"\n  Nodule Integrity: ", style="dim")
+        text.append(f"{nod_status}", style=f"bold {nod_style}")
+
+        total_nod = integrity.get("total_nodules", "?")
+        correct_nod = integrity.get("nodules_with_3_slices", "?")
+        wrong_nod = integrity.get("nodules_with_wrong_count", 0)
+
+        nod_detail = f" ({correct_nod}/{total_nod} nodules with 3 slices"
+        text.append(nod_detail, style="dim") if nod_status != "SKIP" else None
+        wrong_suffix = f", {wrong_nod} incorrect)\n" if wrong_nod > 0 else ")\n"
+        wrong_style = "dim red" if wrong_nod > 0 else "dim"
+        text.append(wrong_suffix, style=wrong_style) if nod_status != "SKIP" else text.append("\n")
+
+        border_style = "green" if is_clean else "red"
+        console.print(Panel(text, title="🔎 Verification Report", border_style=border_style, box=box.DOUBLE))
+
+    @staticmethod
+    def print_export_result(mode: str, count: int, path: str) -> None:
+        icon = "🗑️" if mode == "delete" else "📦"
+        verb = "Deleted" if mode == "delete" else "Copied"
+        console.print(f"\n  {icon} {verb} [bold]{count:,}[/bold] files", style="green")
+        console.print(f"  📁 Location: [cyan]{path}[/cyan]\n") if mode != "delete" else console.print()
+
+    @staticmethod
+    def _compute_health_grade(ratio: float) -> str:
+        grades = [
+            (0.01, "🟢 Excellent (A+)"),
+            (0.05, "🟢 Good (A)"),
+            (0.10, "🟡 Fair (B)"),
+            (0.20, "🟠 Needs Attention (C)"),
+            (0.40, "🔴 Poor (D)"),
+            (1.01, "🔴 Critical (F)"),
+        ]
+        return next(label for threshold, label in grades if ratio < threshold)
+
+
+# ──────────────────────────────────────────────
+# Core Diagnoser
+# ──────────────────────────────────────────────
+
 class DatasetDiagnoser:
     """
-    Analyzes image quality in datasets and provides filtering/cleaning capabilities.
+    Analyzes CT image quality with emphasis on lung content visibility.
     """
-    
-    def __init__(self, dataset_dir: str, thresholds: AnalysisThresholds = AnalysisThresholds()):
+
+    def __init__(self, dataset_dir: str, thresholds: AnalysisThresholds = None):
         self.dataset_dir = Path(dataset_dir)
-        self.thresholds = thresholds
+        self.thresholds = thresholds or AnalysisThresholds()
         self.results: List[ImageAnalysisResult] = []
         self._cached_dfs: Dict[str, pd.DataFrame] = {}
+        self.display = DiagnoserDisplay()
 
-    def analyze(self) -> None:
+    # ── Public API ────────────────────────────
+
+    def analyze(self, show_progress: bool = True) -> None:
         """Run full analysis on the dataset directory structure."""
         self.results = []
-        self._cached_dfs = {} 
+        self._cached_dfs = {}
 
-        # Support standard dataset structure: split/images
-        for split in ['train', 'val', 'test']:
+        splits = ['train', 'val', 'test']
+        found_any = False
+
+        work_items: List[Tuple[Path, str]] = []
+        for split in splits:
             image_dir = self.dataset_dir / split / 'images'
-            if image_dir.exists():
-                self._analyze_directory(image_dir, split)
-            else:
-                # Fallback: check if dataset_dir itself contains images
-                if split == 'train': 
-                     self._analyze_directory(self.dataset_dir, "root")
+            found_any = found_any or image_dir.exists()
+            work_items.append((image_dir, split)) if image_dir.exists() else None
+
+        work_items.append((self.dataset_dir, "root")) if not found_any else None
+
+        all_images: List[Tuple[Path, str]] = []
+        for directory, split in work_items:
+            images = sorted(directory.glob("*.jpg")) + sorted(directory.glob("*.png"))
+            all_images.extend([(fp, split) for fp in images])
+
+        total = len(all_images)
+        console.print(f"  📁 Dataset: [cyan]{self.dataset_dir}[/cyan]")
+        console.print(f"  🖼️  Found [bold]{total:,}[/bold] images across [bold]{len(work_items)}[/bold] split(s)\n")
+
+        self._analyze_with_progress(all_images) if show_progress else self._analyze_silent(all_images)
 
     def get_results_dataframe(self) -> pd.DataFrame:
-        """Returns the full analysis results as a DataFrame."""
-        if 'full' not in self._cached_dfs:
-            if not self.results:
-                return pd.DataFrame()
-            
-            data = []
-            for r in self.results:
-                row = vars(r).copy()
-                if row['metadata']:
-                    for k, v in row['metadata'].items():
-                        row[k] = v
-                del row['metadata']
-                data.append(row)
-            
-            self._cached_dfs['full'] = pd.DataFrame(data)
-            
-        return self._cached_dfs['full']
+        cache_key = 'full'
+        cached = self._cached_dfs.get(cache_key)
+        result = cached if cached is not None else self._build_results_df(cache_key)
+        return result
 
     def get_problematic_images(self) -> pd.DataFrame:
-        """Returns only images flagged as problematic."""
         df = self.get_results_dataframe()
-        if df.empty: return df
-        return df[df['is_problematic']].copy()
+        return df[df['is_problematic']].copy() if not df.empty else df
 
     def get_summary_report(self) -> Dict:
-        """Generates a dictionary containing summary statistics."""
         df = self.get_results_dataframe()
-        if df.empty: return {"error": "No data analyzed"}
+        empty_result = {"error": "No data analyzed"}
+        result = self._build_summary(df) if not df.empty else empty_result
+        return result
 
-        total_images = len(df)
-        problematic_df = df[df['is_problematic']]
-        num_problematic = len(problematic_df)
-        
-        summary = {
-            "total_images": total_images,
-            "problematic_count": num_problematic,
-            "problematic_ratio": num_problematic / total_images if total_images > 0 else 0,
-            "problem_breakdown": problematic_df['problem_type'].value_counts().to_dict(),
-            "split_breakdown": {}
-        }
-
-        if 'split' in df.columns:
-            for split in df['split'].unique():
-                split_df = df[df['split'] == split]
-                prob_count = len(split_df[split_df['is_problematic']])
-                summary['split_breakdown'][split] = {
-                    "total": len(split_df),
-                    "problematic": prob_count,
-                    "ratio": prob_count / len(split_df) if len(split_df) > 0 else 0
-                }
-        
-        return summary
+    def print_summary(self) -> None:
+        """Display rich summary in terminal."""
+        summary = self.get_summary_report()
+        df = self.get_results_dataframe()
+        self.display.print_summary(summary, df) if "error" not in summary else console.print("[red]No data to display.[/red]")
 
     def save_reports_to_disk(self, output_dir: str = None) -> None:
-        """Saves all analysis dataframes (Full, Nodule, Patient, Summary) to CSV files."""
         save_path = Path(output_dir) if output_dir else self.dataset_dir / "analysis"
         save_path.mkdir(parents=True, exist_ok=True)
 
-        logger.info(f"Saving analysis reports to {save_path}...")
-        
         df = self.get_results_dataframe()
         if df.empty:
-            logger.warning("No results to save.")
+            console.print("[yellow]⚠️  No results to save.[/yellow]")
             return
 
-        # 1. Full Image Analysis
-        df.to_csv(save_path / "image_analysis_full.csv", index=False)
-        
-        # 2. Problematic Only
-        self.get_problematic_images().to_csv(save_path / "problematic_images.csv", index=False)
-        
-        # --- NEW: Nodule Analysis (Aggregation) ---
-        # Group by Patient + NoduleIdx
-        if 'nodule_idx' in df.columns:
-            nodule_stats = df.groupby(['patient_id', 'nodule_idx']).agg(
-                total_images=('is_problematic', 'count'),
-                bad_images=('is_problematic', 'sum')
-            ).reset_index()
-            
-            # A nodule is valid ONLY if it has 0 bad images
-            nodule_stats['is_valid'] = nodule_stats['bad_images'] == 0
-            nodule_stats.to_csv(save_path / "nodule_analysis.csv", index=False)
-        
-        # --- NEW: Patient Summary (Aggregation) ---
-        if 'patient_id' in df.columns:
-            patient_stats = df.groupby('patient_id').agg(
-                problematic_count=('is_problematic', 'sum'),
-                total_count=('is_problematic', 'count')
-            ).reset_index()
-            
-            patient_stats['problematic_ratio'] = patient_stats['problematic_count'] / patient_stats['total_count']
-            patient_stats.to_csv(save_path / "patient_summary.csv", index=False)
+        with console.status("[cyan]Saving reports...[/cyan]", spinner="dots"):
+            df.to_csv(save_path / "image_analysis_full.csv", index=False)
+            self.get_problematic_images().to_csv(save_path / "problematic_images.csv", index=False)
+            self._save_nodule_analysis(df, save_path)
+            self._save_patient_summary(df, save_path)
 
-        # 5. Text Summary
-        summary = self.get_summary_report()
-        with open(save_path / "summary_report.txt", "w") as f:
-            for k, v in summary.items():
-                f.write(f"{k}: {v}\n")
-        
-        logger.info(f"Reports saved successfully to: {save_path}")
+            summary = self.get_summary_report()
+            with open(save_path / "summary_report.txt", "w") as f:
+                for k, v in summary.items():
+                    f.write(f"{k}: {v}\n")
+
+        console.print(f"  💾 Reports saved to: [cyan]{save_path}[/cyan]\n")
 
     def export_clean_dataset(self, output_dir: Optional[str] = None, overwrite_existing: bool = False) -> None:
-        """
-        Creates a clean dataset containing ONLY valid nodules.
-        """
         if not self.results:
-            logger.warning("No analysis results available. Run analyze() first.")
+            console.print("[yellow]⚠️  No analysis results. Run analyze() first.[/yellow]")
             return
 
         if not overwrite_existing and not output_dir:
-            logger.error("Must provide either 'output_dir' or set 'overwrite_existing=True'.")
+            console.print("[red]Must provide output_dir or set overwrite_existing=True.[/red]")
             return
 
-        # 1. Identify Bad Nodules
-        df = self.get_results_dataframe()
-        problematic_nodules = df[df['is_problematic']]
-        bad_nodule_keys: Set[Tuple[str, int]] = set()
-        
-        for _, row in problematic_nodules.iterrows():
-            bad_nodule_keys.add((str(row['patient_id']), int(row['nodule_idx'])))
-            
-        logger.info(f"Identified {len(bad_nodule_keys)} problematic nodules.")
+        bad_nodule_keys = self._get_bad_nodule_keys()
+        console.print(f"  🔍 Found [bold red]{len(bad_nodule_keys)}[/bold red] problematic nodules to remove\n")
 
-        # 2. Process Files
-        operations_count = 0
-        
-        for result in self.results:
-            key = (str(result.metadata.get('patient_id')), int(result.metadata.get('nodule_idx', -1)))
-            is_valid_nodule = key not in bad_nodule_keys
-            
-            img_path = Path(result.filepath)
-            label_path = img_path.parent.parent / 'labels' / (img_path.stem + ".txt")
-            
-            # MODE: Create New Dataset
-            if not overwrite_existing and output_dir:
-                if is_valid_nodule:
-                    rel_path_img = img_path.relative_to(self.dataset_dir)
-                    dest_img = Path(output_dir) / rel_path_img
-                    
-                    try:
-                        rel_path_lbl = label_path.relative_to(self.dataset_dir)
-                        dest_lbl = Path(output_dir) / rel_path_lbl
-                    except ValueError:
-                        dest_lbl = Path(output_dir) / result.split / 'labels' / label_path.name
+        with console.status("[cyan]Processing files...[/cyan]", spinner="dots"):
+            operations_count = self._process_files(output_dir, overwrite_existing, bad_nodule_keys)
+            self._update_metadata_csv(output_dir, overwrite_existing, bad_nodule_keys)
 
-                    dest_img.parent.mkdir(parents=True, exist_ok=True)
-                    dest_lbl.parent.mkdir(parents=True, exist_ok=True)
-                    
-                    shutil.copy2(img_path, dest_img)
-                    if label_path.exists():
-                        shutil.copy2(label_path, dest_lbl)
-                    
-                    operations_count += 1
+        mode = "delete" if overwrite_existing else "copy"
+        target = str(self.dataset_dir) if overwrite_existing else output_dir
+        self.display.print_export_result(mode, operations_count, target)
 
-            # MODE: Clean In-Place
-            elif overwrite_existing:
-                if not is_valid_nodule:
-                    try:
-                        if img_path.exists(): img_path.unlink()
-                        if label_path.exists(): label_path.unlink()
-                        operations_count += 1
-                    except Exception as e:
-                        logger.error(f"Failed to delete {img_path.name}: {e}")
+    def verify_clean_dataset(self, clean_dir: str) -> Dict:
+        console.print(f"\n  🔎 Verifying: [cyan]{clean_dir}[/cyan]\n")
 
-        if overwrite_existing:
-            logger.info(f"Cleanup Complete: Deleted {operations_count} invalid files.")
-        else:
-            logger.info(f"Export Complete: Copied {operations_count} valid files to {output_dir}.")
+        verifier = DatasetDiagnoser(clean_dir, self.thresholds)
+        verifier.analyze(show_progress=True)
 
-        # 3. Handle Metadata CSV
-        self._update_metadata_csv(output_dir, overwrite_existing, bad_nodule_keys)
+        summary = verifier.get_summary_report()
 
-    def _update_metadata_csv(self, output_dir, overwrite, bad_keys):
-        """Helper to filter and save the metadata CSV."""
-        meta_path = self.dataset_dir / "metadata" / "regression_dataset.csv"
-        if not meta_path.exists():
+        verification = {
+            "dataset_path": clean_dir,
+            "total_images": summary.get("total_images", 0),
+            "problematic_remaining": summary.get("problematic_count", 0),
+            "is_clean": summary.get("problematic_count", 0) == 0,
+            "problem_breakdown": summary.get("problem_breakdown", {}),
+        }
+
+        df = verifier.get_results_dataframe()
+        verification["nodule_integrity"] = self._check_nodule_integrity(df)
+
+        self.display.print_verification(verification)
+        return verification
+
+    # ── Analysis Engine ───────────────────────
+
+    def _analyze_with_progress(self, all_images: List[Tuple[Path, str]]) -> None:
+        progress = self.display.create_progress()
+        with progress:
+            task = progress.add_task("Analyzing images", total=len(all_images))
+            for filepath, split in all_images:
+                self.results.append(self._analyze_single_image(filepath, split))
+                progress.advance(task)
+        console.print()
+
+    def _analyze_silent(self, all_images: List[Tuple[Path, str]]) -> None:
+        for filepath, split in all_images:
+            self.results.append(self._analyze_single_image(filepath, split))
+
+    def _analyze_single_image(self, filepath: Path, split: str) -> ImageAnalysisResult:
+        metadata = self._extract_metadata_from_filename(filepath.name)
+        img = cv2.imread(str(filepath), cv2.IMREAD_GRAYSCALE)
+
+        unreadable = ImageAnalysisResult(
+            filepath=str(filepath), filename=filepath.name, split=split,
+            metadata=metadata, is_problematic=True, problem_type="UNREADABLE"
+        )
+
+        result = self._run_full_analysis(filepath, split, metadata, img) if img is not None else unreadable
+        return result
+
+    def _run_full_analysis(self, filepath: Path, split: str, metadata: Dict, gray: np.ndarray) -> ImageAnalysisResult:
+        t = self.thresholds
+        total = gray.size
+
+        mean_val = float(gray.mean())
+        std_val = float(gray.std())
+        min_val = int(gray.min())
+        max_val = int(gray.max())
+
+        dark = int(np.sum(gray < 50))
+        mid = int(np.sum((gray >= 50) & (gray <= 200)))
+        bright = int(np.sum(gray > 200))
+
+        dark_ratio = dark / total
+        mid_ratio = mid / total
+        bright_ratio = bright / total
+
+        lung_metrics = self._compute_lung_metrics(gray)
+
+        is_uniform = std_val < t.uniform_std
+        is_too_dark = dark_ratio > t.too_dark_ratio
+        is_too_bright = mean_val > t.too_bright_mean
+        is_missing_contrast = (max_val - min_val) < t.min_contrast_range
+        has_no_dark_background = dark_ratio < t.min_dark_ratio and mean_val > 100
+        has_insufficient_lung = lung_metrics['lung_body_ratio'] < t.min_lung_body_ratio
+
+        problem_checks = [
+            (is_uniform, "UNIFORM"),
+            (is_too_dark, "TOO_DARK"),
+            (is_too_bright, "TOO_BRIGHT"),
+            (is_missing_contrast and not is_uniform, "LOW_CONTRAST"),
+            (has_no_dark_background and not is_too_bright, "NO_BG"),
+            (has_insufficient_lung, "INSUFFICIENT_LUNG"),
+        ]
+        problems = list(map(lambda p: p[1], filter(lambda p: p[0], problem_checks)))
+
+        return ImageAnalysisResult(
+            filepath=str(filepath), filename=filepath.name, split=split, metadata=metadata,
+            mean=round(mean_val, 2), std=round(std_val, 2),
+            min_val=min_val, max_val=max_val,
+            dark_pixel_ratio=round(dark_ratio, 3),
+            mid_pixel_ratio=round(mid_ratio, 3),
+            bright_pixel_ratio=round(bright_ratio, 3),
+            body_ratio=round(lung_metrics['body_ratio'], 3),
+            lung_body_ratio=round(lung_metrics['lung_body_ratio'], 3),
+            lung_region_count=lung_metrics['lung_region_count'],
+            is_uniform=is_uniform, is_too_dark=is_too_dark, is_too_bright=is_too_bright,
+            is_missing_contrast=is_missing_contrast,
+            has_no_dark_background=has_no_dark_background,
+            has_insufficient_lung=has_insufficient_lung,
+            is_problematic=len(problems) > 0,
+            problem_type="; ".join(problems) if problems else "OK"
+        )
+
+    def _compute_lung_metrics(self, gray: np.ndarray) -> Dict:
+        t = self.thresholds
+        total = gray.size
+
+        body_mask = (gray > t.body_intensity_floor).astype(np.uint8) * 255
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (t.morph_kernel_size, t.morph_kernel_size))
+        body_mask = cv2.morphologyEx(body_mask, cv2.MORPH_CLOSE, kernel)
+        body_mask = cv2.morphologyEx(body_mask, cv2.MORPH_OPEN, kernel)
+
+        body_area = int(np.sum(body_mask > 0))
+        body_ratio = body_area / total
+
+        lo, hi = t.lung_intensity_range
+        lung_candidate = ((gray >= lo) & (gray < hi)).astype(np.uint8) * 255
+        lung_in_body = cv2.bitwise_and(lung_candidate, body_mask)
+
+        lung_area = int(np.sum(lung_in_body > 0))
+        lung_body_ratio = lung_area / body_area if body_area > 0 else 0.0
+
+        contours, _ = cv2.findContours(lung_in_body, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        significant = list(filter(lambda c: cv2.contourArea(c) > t.min_lung_contour_area, contours))
+
+        return {
+            "body_ratio": body_ratio,
+            "lung_body_ratio": lung_body_ratio,
+            "lung_region_count": len(significant),
+        }
+
+    # ── Metadata & Filename Parsing ───────────
+
+    @staticmethod
+    def _extract_metadata_from_filename(filename: str) -> Dict:
+        name = Path(filename).stem
+        match = re.match(r'^(.+)_n(\d+)_z(\d+)$', name)
+        result = (
+            {"patient_id": match.group(1), "nodule_idx": int(match.group(2)), "slice_idx": int(match.group(3))}
+            if match
+            else {}
+        )
+        return result
+
+    # ── DataFrame Builders ────────────────────
+
+    def _build_results_df(self, cache_key: str) -> pd.DataFrame:
+        empty = pd.DataFrame()
+        if not self.results:
+            return empty
+
+        data = []
+        for r in self.results:
+            row = vars(r).copy()
+            meta = row.pop('metadata', {})
+            row.update(meta)
+            data.append(row)
+
+        df = pd.DataFrame(data)
+        self._cached_dfs[cache_key] = df
+        return df
+
+    def _build_summary(self, df: pd.DataFrame) -> Dict:
+        total_images = len(df)
+        problematic_df = df[df['is_problematic']]
+        num_problematic = len(problematic_df)
+
+        summary = {
+            "total_images": total_images,
+            "problematic_count": num_problematic,
+            "problematic_ratio": round(num_problematic / total_images, 4) if total_images > 0 else 0,
+            "problem_breakdown": problematic_df['problem_type'].value_counts().to_dict(),
+            "lung_stats": {
+                "mean_lung_body_ratio": round(df['lung_body_ratio'].mean(), 3),
+                "median_lung_body_ratio": round(df['lung_body_ratio'].median(), 3),
+                "min_lung_body_ratio": round(df['lung_body_ratio'].min(), 3),
+                "flagged_insufficient_lung": int(df['has_insufficient_lung'].sum()),
+            },
+            "split_breakdown": {},
+        }
+
+        splits = df['split'].unique() if 'split' in df.columns else []
+        for split in splits:
+            split_df = df[df['split'] == split]
+            prob_count = int(split_df['is_problematic'].sum())
+            summary['split_breakdown'][split] = {
+                "total": len(split_df),
+                "problematic": prob_count,
+                "ratio": round(prob_count / len(split_df), 4) if len(split_df) > 0 else 0,
+            }
+
+        return summary
+
+    # ── Report Saving Helpers ─────────────────
+
+    def _save_nodule_analysis(self, df: pd.DataFrame, save_path: Path) -> None:
+        has_col = 'nodule_idx' in df.columns
+        if not has_col:
             return
 
-        df_meta = pd.read_csv(meta_path)
-        
-        def is_valid(row):
-            n_idx = row.get('nodule_index', row.get('nodule_idx', -1))
-            return (str(row['patient_id']), int(n_idx)) not in bad_keys
+        nodule_stats = df.groupby(['patient_id', 'nodule_idx']).agg(
+            total_images=('is_problematic', 'count'),
+            bad_images=('is_problematic', 'sum'),
+            mean_lung_ratio=('lung_body_ratio', 'mean'),
+        ).reset_index()
 
-        df_clean = df_meta[df_meta.apply(is_valid, axis=1)]
-        
-        if overwrite:
-            df_clean.to_csv(meta_path, index=False)
-            logger.info(f"Updated metadata CSV in-place: {meta_path}")
-        elif output_dir:
-            dest_meta_dir = Path(output_dir) / "metadata"
-            dest_meta_dir.mkdir(parents=True, exist_ok=True)
-            df_clean.to_csv(dest_meta_dir / "regression_dataset.csv", index=False)
-            logger.info(f"Saved clean metadata CSV to: {dest_meta_dir}")
+        nodule_stats['is_valid'] = nodule_stats['bad_images'] == 0
+        nodule_stats.to_csv(save_path / "nodule_analysis.csv", index=False)
 
-    def filter_dataset_metadata(self, metadata_csv_path: str, output_csv_path: str) -> pd.DataFrame:
-        """Keeps compatibility with the previous API call."""
-        return self._update_metadata_csv(None, False, self._get_bad_keys_from_results()) or pd.DataFrame()
+    def _save_patient_summary(self, df: pd.DataFrame, save_path: Path) -> None:
+        has_col = 'patient_id' in df.columns
+        if not has_col:
+            return
 
-    def _get_bad_keys_from_results(self):
+        patient_stats = df.groupby('patient_id').agg(
+            problematic_count=('is_problematic', 'sum'),
+            total_count=('is_problematic', 'count'),
+            mean_lung_ratio=('lung_body_ratio', 'mean'),
+        ).reset_index()
+
+        patient_stats['problematic_ratio'] = patient_stats['problematic_count'] / patient_stats['total_count']
+        patient_stats.to_csv(save_path / "patient_summary.csv", index=False)
+
+    # ── Nodule Integrity ──────────────────────
+
+    @staticmethod
+    def _check_nodule_integrity(df: pd.DataFrame) -> Dict:
+        result = {"status": "SKIP", "details": "No nodule metadata"}
+
+        has_cols = 'patient_id' in df.columns and 'nodule_idx' in df.columns
+        if has_cols:
+            counts = df.groupby(['patient_id', 'nodule_idx']).size().reset_index(name='slice_count')
+            non_three = counts[counts['slice_count'] != 3]
+            result = {
+                "status": "PASS" if non_three.empty else "FAIL",
+                "total_nodules": len(counts),
+                "nodules_with_3_slices": int((counts['slice_count'] == 3).sum()),
+                "nodules_with_wrong_count": len(non_three),
+                "wrong_count_details": non_three.to_dict('records') if not non_three.empty else [],
+            }
+
+        return result
+
+    # ── Clean Dataset Export ──────────────────
+
+    def _get_bad_nodule_keys(self) -> Set[Tuple[str, int]]:
         df = self.get_results_dataframe()
         problematic = df[df['is_problematic']]
         bad_keys = set()
@@ -285,72 +652,179 @@ class DatasetDiagnoser:
             bad_keys.add((str(row['patient_id']), int(row['nodule_idx'])))
         return bad_keys
 
-    def _analyze_directory(self, directory: Path, split: str):
-        images = list(directory.glob("*.jpg")) + list(directory.glob("*.png"))
-        logger.info(f"Analyzing {len(images)} images in {split}...")
-        for idx, filepath in enumerate(images):
-            if (idx + 1) % 500 == 0:
-                logger.info(f"Progress: {idx + 1}/{len(images)}")
-            self.results.append(self._analyze_single_image(filepath, split))
+    def _process_files(self, output_dir: Optional[str], overwrite: bool, bad_keys: Set) -> int:
+        ops = 0
+        for result in self.results:
+            key = (str(result.metadata.get('patient_id')), int(result.metadata.get('nodule_idx', -1)))
+            is_valid = key not in bad_keys
 
-    def _analyze_single_image(self, filepath: Path, split: str) -> ImageAnalysisResult:
-        img = cv2.imread(str(filepath))
-        metadata = self._extract_metadata_from_filename(filepath.name)
+            img_path = Path(result.filepath)
+            label_path = img_path.parent.parent / 'labels' / (img_path.stem + ".txt")
 
-        if img is None:
-            return ImageAnalysisResult(filepath=str(filepath), filename=filepath.name, split=split, metadata=metadata, is_problematic=True, problem_type="UNREADABLE")
+            ops += self._copy_valid_file(result, img_path, label_path, output_dir) if (not overwrite and output_dir and is_valid) else 0
+            ops += self._delete_invalid_file(img_path, label_path) if (overwrite and not is_valid) else 0
 
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        mean_val = float(gray.mean())
-        std_val = float(gray.std())
-        min_val = int(gray.min())
-        max_val = int(gray.max())
-        
-        total = gray.size
-        dark = np.sum(gray < 50)
-        mid = np.sum((gray >= 50) & (gray <= 200))
-        bright = np.sum(gray > 200)
-        
-        dark_ratio = dark / total
-        mid_ratio = mid / total
-        bright_ratio = bright / total
-        
-        is_uniform = std_val < self.thresholds.uniform_std
-        is_too_dark = dark_ratio > self.thresholds.too_dark_ratio
-        is_too_bright = mean_val > self.thresholds.too_bright_mean
-        is_missing_contrast = (max_val - min_val) < self.thresholds.min_contrast_range
-        has_no_dark_background = dark_ratio < self.thresholds.min_dark_ratio and mean_val > 100
-        
-        problems = []
-        if is_uniform: problems.append("UNIFORM")
-        if is_too_dark: problems.append("TOO_DARK")
-        if is_too_bright: problems.append("TOO_BRIGHT")
-        if is_missing_contrast and not is_uniform: problems.append("LOW_CONTRAST")
-        if has_no_dark_background and not is_too_bright: problems.append("NO_BG")
-        
-        return ImageAnalysisResult(
-            filepath=str(filepath), filename=filepath.name, split=split, metadata=metadata,
-            mean=round(mean_val, 2), std=round(std_val, 2), min_val=min_val, max_val=max_val,
-            dark_pixel_ratio=round(dark_ratio, 3), mid_pixel_ratio=round(mid_ratio, 3), bright_pixel_ratio=round(bright_ratio, 3),
-            is_uniform=is_uniform, is_too_dark=is_too_dark, is_too_bright=is_too_bright,
-            is_missing_contrast=is_missing_contrast, has_no_dark_background=has_no_dark_background,
-            is_problematic=len(problems) > 0, problem_type="; ".join(problems) if problems else "OK"
-        )
+        return ops
 
-    def _extract_metadata_from_filename(self, filename: str) -> Dict:
-        name = Path(filename).stem
-        match = re.match(r'^(.+)_n(\d+)_z(\d+)$', name)
-        if match:
-            return {"patient_id": match.group(1), "nodule_idx": int(match.group(2)), "slice_idx": int(match.group(3))}
-        return {}
+    def _copy_valid_file(self, result: ImageAnalysisResult, img_path: Path, label_path: Path, output_dir: str) -> int:
+        rel_img = img_path.relative_to(self.dataset_dir)
+        dest_img = Path(output_dir) / rel_img
+
+        try:
+            rel_lbl = label_path.relative_to(self.dataset_dir)
+            dest_lbl = Path(output_dir) / rel_lbl
+        except ValueError:
+            dest_lbl = Path(output_dir) / result.split / 'labels' / label_path.name
+
+        dest_img.parent.mkdir(parents=True, exist_ok=True)
+        dest_lbl.parent.mkdir(parents=True, exist_ok=True)
+
+        shutil.copy2(img_path, dest_img)
+        shutil.copy2(label_path, dest_lbl) if label_path.exists() else None
+
+        return 1
+
+    @staticmethod
+    def _delete_invalid_file(img_path: Path, label_path: Path) -> int:
+        try:
+            img_path.unlink() if img_path.exists() else None
+            label_path.unlink() if label_path.exists() else None
+            return 1
+        except Exception as e:
+            logger.error(f"Failed to delete {img_path.name}: {e}")
+            return 0
+
+    def _update_metadata_csv(self, output_dir: Optional[str], overwrite: bool, bad_keys: Set) -> None:
+        meta_path = self.dataset_dir / "metadata" / "regression_dataset.csv"
+        if not meta_path.exists():
+            return
+
+        df_meta = pd.read_csv(meta_path)
+
+        def is_valid(row):
+            n_idx = row.get('nodule_index', row.get('nodule_idx', -1))
+            return (str(row['patient_id']), int(n_idx)) not in bad_keys
+
+        df_clean = df_meta[df_meta.apply(is_valid, axis=1)]
+
+        save_actions = {
+            True: lambda: df_clean.to_csv(meta_path, index=False) or logger.info(f"Updated metadata in-place: {meta_path}"),
+            False: lambda: self._save_clean_metadata(df_clean, output_dir),
+        }
+        save_actions[overwrite]()
+
+    @staticmethod
+    def _save_clean_metadata(df_clean: pd.DataFrame, output_dir: Optional[str]) -> None:
+        if not output_dir:
+            return
+        dest = Path(output_dir) / "metadata"
+        dest.mkdir(parents=True, exist_ok=True)
+        df_clean.to_csv(dest / "regression_dataset.csv", index=False)
+
+
+# ──────────────────────────────────────────────
+# Interactive CLI
+# ──────────────────────────────────────────────
+
+def run_interactive() -> None:
+    """Interactive terminal interface for the diagnoser."""
+    DiagnoserDisplay.print_banner()
+
+    # Step 1: Get dataset path
+    dataset_path = Prompt.ask("  📂 Enter dataset directory path").strip()
+    dataset = Path(dataset_path)
+
+    if not dataset.exists():
+        console.print(f"\n  [bold red]❌ Path does not exist:[/bold red] {dataset_path}")
+        return
+
+    console.print()
+
+    # Step 2: Initialize and show thresholds
+    diagnoser = DatasetDiagnoser(dataset_path)
+    diagnoser.display.print_thresholds(diagnoser.thresholds)
+
+    # Step 3: Analyze
+    console.rule("[bold cyan]Phase 1: Analysis[/bold cyan]", style="cyan")
+    console.print()
+
+    start = time.time()
+    diagnoser.analyze()
+    elapsed = time.time() - start
+
+    console.print(f"  ⏱️  Analysis completed in [bold]{elapsed:.1f}s[/bold]\n")
+
+    # Step 4: Display summary
+    console.rule("[bold cyan]Results[/bold cyan]", style="cyan")
+    console.print()
+    diagnoser.print_summary()
+
+    # Step 5: Save reports
+    console.print()
+    save = Confirm.ask("  💾 Save reports to disk?", default=True)
+    if save:
+        default_path = str(dataset / "analysis")
+        save_dir = Prompt.ask("     Save location", default=default_path).strip()
+        diagnoser.save_reports_to_disk(save_dir)
+
+    # Step 6: Ask about cleaning
+    summary = diagnoser.get_summary_report()
+    prob_count = summary.get("problematic_count", 0)
+
+    if prob_count == 0:
+        console.print("\n  [bold green]✨ Dataset is already clean — no action needed![/bold green]\n")
+        return
+
+    console.print()
+    console.rule("[bold yellow]Phase 2: Cleaning[/bold yellow]", style="yellow")
+    console.print()
+    console.print(f"  Found [bold red]{prob_count}[/bold red] problematic images.")
+    console.print()
+
+    clean = Confirm.ask("  🧹 Would you like to create a clean dataset?", default=True)
+    if not clean:
+        console.print("\n  [dim]Skipping cleaning. You can re-run anytime.[/dim]\n")
+        return
+
+    console.print()
+    mode_choice = Prompt.ask(
+        "     Clean mode",
+        choices=["copy", "overwrite"],
+        default="copy"
+    )
+
+    output_dir = None
+    overwrite = mode_choice == "overwrite"
+
+    if overwrite:
+        console.print("\n  [bold red]⚠️  WARNING: This will permanently delete files from the original dataset![/bold red]")
+        confirmed = Confirm.ask("     Are you sure?", default=False)
+        if not confirmed:
+            console.print("\n  [dim]Cancelled.[/dim]\n")
+            return
+    else:
+        default_clean = str(dataset.parent / (dataset.name + "_clean"))
+        output_dir = Prompt.ask("     Output directory for clean dataset", default=default_clean).strip()
+
+    console.print()
+    diagnoser.export_clean_dataset(output_dir=output_dir, overwrite_existing=overwrite)
+
+    # Step 7: Verify
+    console.rule("[bold green]Phase 3: Verification[/bold green]", style="green")
+
+    verify_path = output_dir if output_dir else str(dataset)
+    do_verify = Confirm.ask(f"\n  🔎 Verify the cleaned dataset at [cyan]{verify_path}[/cyan]?", default=True)
+
+    if do_verify:
+        diagnoser.verify_clean_dataset(verify_path)
+
+    console.print()
+    console.print(Panel(
+        "  [bold green]Done![/bold green] Your dataset is ready for training. 🚀  ",
+        border_style="green", box=box.DOUBLE
+    ))
+    console.print()
+
 
 if __name__ == "__main__":
-    import sys
-    if len(sys.argv) < 2:
-        print("Usage: python diagnose_class.py <dataset_dir>")
-        sys.exit(1)
-        
-    dataset_path = sys.argv[1]
-    diagnoser = DatasetDiagnoser(dataset_path)
-    diagnoser.analyze()
-    diagnoser.save_reports_to_disk()
+    run_interactive()

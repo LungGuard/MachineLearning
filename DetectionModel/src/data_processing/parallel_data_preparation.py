@@ -1,141 +1,212 @@
-"""Parallel offline data preparation pipeline using multiprocessing."""
+"""
+Parallel data preparation pipeline using multiprocessing.
+
+Uses the shared DataPreparationPipeline for setup/finalisation.
+Adds a LiveDashboard with pause/resume/abort support and worker
+warning suppression so Rich output stays clean.
+"""
 
 import logging
+import os
+import time
+import warnings
 from multiprocessing import Pool, cpu_count
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
-# Imports
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
+os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
+warnings.filterwarnings("ignore")
+
 from .offline_data_preparation import (
-    DataPreparationPipeline, 
-    setup_logging, 
-    import_pylidc, 
-    configure_pylidc,
+    DataPreparationPipeline,
     DataPrepConfig,
     MonaiProcessor,
-    get_patient_split
+    configure_pylidc,
+    get_patient_split,
+    import_pylidc,
 )
+from terminal_ui import (
+    PipelineMode,
+    print_completion_banner,
+    print_info,
+    print_processing_stats,
+    print_section_divider,
+    print_warning,
+)
+from pipeline_wizard import LiveDashboard, run_interactive_cleanup
+from .diagnose_dataset import DatasetDiagnoser
 
 logger = logging.getLogger(__name__)
 
-# Global worker variable
+# ──────────────────────────────────────────────────────────
+# Worker helpers
+# ──────────────────────────────────────────────────────────
+
 _worker_pylidc = None
 
-def _init_worker(data_path: str):
-    """Initialize each worker process with its own pylidc configuration."""
+
+def _init_worker(data_path: str) -> None:
+    """
+    Initialize each worker: suppress ALL warnings and route logs
+    exclusively to the file handler (no console writes).
+    """
     global _worker_pylidc
+
+    os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
+    os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
+    warnings.filterwarnings("ignore")
+
+    # Worker logs go only to file — never to Rich console
+    root = logging.getLogger()
+    root.handlers.clear()
+    log_dir = Path("logs")
+    log_dir.mkdir(exist_ok=True)
+    fh = logging.FileHandler(log_dir / "lungguard_pipeline.log", encoding="utf-8")
+    fh.setLevel(logging.DEBUG)
+    fh.setFormatter(logging.Formatter(
+        "%(asctime)s | %(levelname)-8s | WORKER | %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    ))
+    root.addHandler(fh)
+    root.setLevel(logging.DEBUG)
+
     try:
         configure_pylidc(data_path)
         _worker_pylidc = import_pylidc()
-    except Exception as e:
-        logger.error(f"Worker initialization failed: {e}")
+    except Exception as exc:
+        logger.error(f"Worker initialisation failed: {exc}")
         _worker_pylidc = None
 
+
 def _worker_process_scan(args: Tuple) -> List[Dict]:
-    """Worker function to process a single scan."""
+    """Worker function — process a single scan, return metadata list."""
     patient_id, patient_split, config_dict, directories_dict = args
     global _worker_pylidc
     pylidc = _worker_pylidc
 
+    result: List[Dict] = []
     config = DataPrepConfig(**config_dict)
     directories = {k: Path(v) for k, v in directories_dict.items()}
 
     try:
-        scan = pylidc.query(pylidc.Scan).filter(pylidc.Scan.patient_id == patient_id).first()
-        if not scan: return []
+        scan = (
+            pylidc.query(pylidc.Scan)
+            .filter(pylidc.Scan.patient_id == patient_id)
+            .first()
+        )
+        if scan is not None:
+            processor = MonaiProcessor(config, directories)
+            result = processor.process_scan(scan, patient_split, pl_module=pylidc)
+    except Exception as exc:
+        logger.error(f"[{patient_id}] Worker error: {exc}")
 
-        processor = MonaiProcessor(config, directories)
-        scan_metadata = processor.process_scan(scan, patient_split, pl_module=pylidc)
-        return scan_metadata
+    return result
 
-    except Exception as e:
-        logger.error(f"[{patient_id}] Worker error: {e}")
-        return []
 
-def run_parallel_pipeline(config: DataPrepConfig, num_workers: int = None) -> Path:
-    """Orchestrates the parallel data preparation."""
-    
-    # 1. Initialize shared pipeline logic
+# ──────────────────────────────────────────────────────────
+# Parallel Orchestrator
+# ──────────────────────────────────────────────────────────
+
+
+def run_parallel_pipeline(
+    config: DataPrepConfig,
+    num_workers: Optional[int] = None,
+) -> Path:
+    """
+    Orchestrate parallel processing with a LiveDashboard.
+    Keyboard controls: [P] Pause  [R] Resume  [Q] Abort
+    (Skip is not supported in parallel mode because imap_unordered
+    does not expose per-scan granularity to the main process.)
+    """
+
+    # 1. Setup
     pipeline = DataPreparationPipeline(config)
-    pipeline.setup()
+    num_workers = num_workers or max(1, cpu_count() - 2)
+    pipeline.setup(mode=PipelineMode.PARALLEL, num_workers=num_workers)
 
-    # 2. Prepare arguments for workers
-    if num_workers is None:
-        num_workers = max(1, cpu_count() - 2)
-    
-    logger.info(f"[Parallel] Starting processing with {num_workers} workers...")
-    
-    config_dict = {k: v for k, v in config.__dict__.items() if not k.startswith('_')}
+    # 2. Prepare task arguments
+    config_dict = {
+        k: v for k, v in config.__dict__.items() if not k.startswith("_")
+    }
     directories_dict = {k: str(v) for k, v in pipeline.directories.items()}
-    
-    task_args = []
+
+    task_args: List[Tuple] = []
     for scan, _ in pipeline.scans_to_process:
         pid = scan.patient_id
         split = get_patient_split(pid, pipeline.splits)
         task_args.append((pid, split, config_dict, directories_dict))
 
-    # 3. Run Multiprocessing
-    all_metadata = []
-    completed = 0
     total = len(task_args)
-
-    try:
-        with Pool(processes=num_workers, initializer=_init_worker, initargs=(config.data_path,)) as pool:
-            for result in pool.imap_unordered(_worker_process_scan, task_args, chunksize=1):
-                completed += 1
-                if result:
-                    all_metadata.extend(result)
-                
-                if completed % config.log_freq == 0:
-                    logger.info(f"  [Parallel] Progress: {completed}/{total} scans processed.")
-                    
-    except KeyboardInterrupt:
-        logger.warning("Interrupted! Stopping workers...")
-        pool.terminate()
-        pool.join()
-        raise
-
-    csv_path = pipeline.finalize(all_metadata, {"num_workers": num_workers})
-    
-    pipeline.interactive_cleanup()
-    
-    return csv_path
-
-
-def main_parallel(config_overrides: Dict = None, num_workers: int = None):
-    # Manual default config (since we moved PARALLEL_DEFAULT_CONFIG)
-    config_values = {
-        'data_path': r"E:\FinalsProject\Datasets\CancerDetection\images\manifest-1600709154662\LIDC-IDRI",
-        'output_dir': r".\DetectionModel\datasets_monai",
-        'train_ratio': 0.70, 'val_ratio': 0.15, 'test_ratio': 0.15,
-        'min_diameter': 3.0, 'max_diameter': 100.0,
-        'slices_per_nodule': 3, 'seed': 42, 'debug': False, 'log_freq': 5
-    }
-    
-    if config_overrides: 
-        config_values.update(config_overrides)
-        
-    setup_logging(debug=config_values['debug'])
-
-    config = DataPrepConfig(
-        data_path=config_values['data_path'],
-        output_dir=config_values['output_dir'],
-        train_ratio=config_values['train_ratio'],
-        val_ratio=config_values['val_ratio'],
-        test_ratio=config_values['test_ratio'],
-        min_nodule_diameter=config_values['min_diameter'],
-        max_nodule_diameter=config_values['max_diameter'],
-        slices_per_nodule=config_values['slices_per_nodule'],
-        random_seed=config_values['seed'],
-        log_freq=config_values['log_freq']
+    print_section_divider("Parallel Processing")
+    print_info(
+        f"Dispatching [metric]{total}[/metric] scans across "
+        f"[highlight]{num_workers}[/highlight] workers"
     )
 
-    return run_parallel_pipeline(config, num_workers=num_workers)
+    # 3. Live dashboard + multiprocessing
+    all_metadata: List[Dict] = []
+    dashboard = LiveDashboard(total)
+    dashboard.start()
+    was_aborted = False
 
+    try:
+        with Pool(
+            processes=num_workers,
+            initializer=_init_worker,
+            initargs=(config.data_path,),
+        ) as pool:
 
-if __name__ == "__main__":
-    config_overrides = {
-        'output_dir': r".\DetectionModel\datasets_monai",
-        # 'num_workers': 4 
-    }
-    main_parallel(config_overrides)
+            results_iter = pool.imap_unordered(
+                _worker_process_scan, task_args, chunksize=1,
+            )
+
+            for result in results_iter:
+                dashboard.poll_commands()
+
+                # Abort — terminate pool, stop iterating
+                if dashboard.aborted:
+                    print_warning("Aborted — terminating workers…")
+                    pool.terminate()
+                    pool.join()
+                    was_aborted = True
+                    # imap_unordered will raise on next iteration;
+                    # the finally block handles dashboard.stop()
+                    # We need to exit the for-loop cleanly:
+                    all_metadata.clear()  # partial results unreliable after terminate
+                    # fall through
+
+                if not was_aborted:
+                    # Pause — block main thread, workers keep finishing queued tasks
+                    dashboard.wait_while_paused()
+
+                    if result:
+                        all_metadata.extend(result)
+                        dashboard.advance(scan_images=len(result))
+                    else:
+                        dashboard.advance(was_error=True)
+
+    except (KeyboardInterrupt, StopIteration):
+        print_warning("Interrupted — stopping workers…")
+        was_aborted = True
+    finally:
+        dashboard.stop()
+
+    print_processing_stats(
+        total_scans=total,
+        successful=dashboard.successful,
+        failed=dashboard.failed,
+        total_images=dashboard.images,
+        elapsed_seconds=dashboard.elapsed,
+    )
+
+    # 4. Finalize + cleanup
+    extra = {"mode": "parallel", "num_workers": num_workers}
+    if was_aborted:
+        extra["aborted"] = True
+
+    csv_path = pipeline.finalize(all_metadata, extra)
+    run_interactive_cleanup(config.output_dir, DatasetDiagnoser)
+    print_completion_banner(log_file=pipeline._log_file)
+
+    return csv_path

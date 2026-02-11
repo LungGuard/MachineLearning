@@ -45,7 +45,6 @@ class BaseCNNModel(L.LightningModule):
         self.optimizer_cls = optimizer_cls
         self.additional_optimizers = additional_optimizers or {}
         self.custom_callbacks = callbacks or []
-        self.notifier = NtfyNotificationService(model_name=self.model_name)
         self.features = nn.ModuleList()
 
         self._build_model()
@@ -108,67 +107,35 @@ class BaseCNNModel(L.LightningModule):
     # ======================== TRAINING ========================
 
     def training_step(self, batch, batch_idx):
-        loss, preds, targets = self._compute_step(batch)
-        self.train_metrics.update(preds, targets)
-        self.log(Metrics.DEFAULT_METRIC_LOSS.get_metric_variant(ModelStage.TRAIN), loss, on_step=True, on_epoch=True, prog_bar=True)
+        loss, preds, targets = self._common_step(batch,self.train_metrics)
+        self.log(Metrics.DEFAULT_METRIC_LOSS.get_metric_variant(ModelStage.TRAIN), loss,on_step=False, on_epoch=True, prog_bar=True)
         self.log_dict(self.train_metrics, on_step=False, on_epoch=True, prog_bar=True)
         return loss
 
     # ======================== VALIDATION ========================
 
     def validation_step(self, batch, batch_idx):
-        loss, preds, targets = self._compute_step(batch)
-        self.val_metrics.update(preds, targets)
+        loss, preds, targets = self._common_step(batch,self.val_metrics)
         self.log(Metrics.DEFAULT_METRIC_LOSS.get_metric_variant(ModelStage.VAL), loss, prog_bar=True)
         self.log_dict(self.val_metrics, on_step=False, on_epoch=True, prog_bar=True)
-
+        return loss
     # ======================== TEST ========================
 
     def test_step(self, batch, batch_idx):
-        loss, preds, targets = self._compute_step(batch)
-        self.test_metrics.update(preds, targets)
+        loss, preds, targets = self._common_step(batch,self.test_metrics)
         self.log(Metrics.DEFAULT_METRIC_LOSS.get_metric_variant(ModelStage.TEST), loss)
         self.log_dict(self.test_metrics, on_step=False, on_epoch=True)
+        return loss
     
-    # ======================== EVALUATION ========================
-    def eval_model(self, dataloader, trainer=None, notify=True) -> dict:
-        active_trainer = trainer or L.Trainer(
-            accelerator=BaseModelConstants.EVAL_TRAINER_ACCELERATOR_MODE,
-            logger=False,
-        )
-
-        test_results = active_trainer.test(self, dataloaders=dataloader, verbose=True)
+    def _common_step(self,batch,batch_idx,model_stage_metrics):
+        loss, preds, targets = self._compute_step(batch)
+        model_stage_metrics.update(preds, targets)
+        return loss,preds,targets
         
-        results = test_results[0] if test_results else {}
 
-        if notify:
-            self._notify_results(results)
-
-        return results
-
-    def _notify_results(self, results: dict):
-        try:
-            clean_results = {k.replace(ModelStage.TEST.prefix, ""): v for k, v in results.items()}
-            msg = NtfyNotificationService.format_metrics_msg(clean_results)
-            self.notifier.send_evaluation_results(msg)
-        except Exception as e:
-            logger.warning(f"Notification failed: {e}")
 
     # ======================== LOADING ========================
 
-    @classmethod
-    def load_or_build(cls, checkpoint_path: str = None, **kwargs):
-        has_checkpoint = checkpoint_path and Path(checkpoint_path).exists()
-        
-        loaded_model = cls.load_from_checkpoint(
-            checkpoint_path, strict=False, **kwargs
-        ) if has_checkpoint else None
-
-        result = loaded_model or cls(**kwargs)
-        
-        log_msg = f"Loaded checkpoint: {checkpoint_path}" if has_checkpoint else "Built new model"
-        logger.info(log_msg)
-        return result
 
     def _get_conv_block(self, in_channels, out_channels, kernel_size=3):
         return Conv2DBlock(in_channels, out_channels, kernel_size, nn.ReLU())

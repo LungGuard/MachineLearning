@@ -20,6 +20,7 @@ datasets/
 ClassificationModel/datasets/
 DetectionModel/datasets/
 DetectionModel/datasets_monai/
+DetectionModel/dataset*
 
 # Training artifacts (keep directory structure)
 logs/*

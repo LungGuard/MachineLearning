@@ -52,13 +52,15 @@ class NotificationCallback(Callback):
 class NtfyCallback(L.Callback):
     """Lightning callback for ntfy.sh training notifications."""
 
-    def __init__(self, notifier ,notify_every_n_epochs: int = 10,notify_on_epoch=False):
+    def __init__(self,model_name,notify_every_n_epochs: int = 10,notify_on_epoch=False):
         super().__init__()
+        self.notifier=NtfyNotificationService(model_name=model_name)
         self.notify_interval = notify_every_n_epochs
         self.notify_on_epoch=notify_on_epoch
-        self.notifier=notifier
+        self.start_time=None
 
     def on_train_start(self, trainer, pl_module):
+        self.start_time = time.time()
         self.notifier.send_training_start_message()
 
     def on_train_epoch_end(self, trainer, pl_module):
@@ -68,6 +70,14 @@ class NtfyCallback(L.Callback):
             metrics = self._extract_metrics(trainer)
             msg = NtfyNotificationService.format_metrics_msg(metrics)
             self.notifier.send_epoch_update(epoch=epoch, metrics=msg)
+            
+    def on_train_end(self, trainer, pl_module):
+
+        duration = (time.time() - self.start_time) / 60
+        metrics=self._extract_metrics(trainer)
+        msg=NtfyNotificationService.format_metrics_msg(metrics)
+
+        self.notifier.send_training_end_message(msg,duration)
 
     def on_test_end(self, trainer, pl_module):
         metrics = self._extract_metrics(trainer)

@@ -32,6 +32,8 @@ class NodulesDetectionModel(BaseCNNModel):
                  learning_rate: float = None,
                  additional_layers = None,
                  freeze_backbone: bool = True,
+                 callbacks=None,
+                 metrics=None,
                  **kwargs):
 
         self.additional_layers = additional_layers or []
@@ -45,6 +47,7 @@ class NodulesDetectionModel(BaseCNNModel):
             num_classes=self.NODULE_CLASS_COUNT,
             learning_rate=learning_rate or ModelConstants.LEARNING_RATE,
             metrics=None,
+            callbacks=callbacks,
             **kwargs
         )
 
@@ -81,62 +84,21 @@ class NodulesDetectionModel(BaseCNNModel):
     def training_step(self, batch, batch_idx):
         loss = self._compute_detection_loss(batch)
         self.log(Metrics.DEFAULT_METRIC_LOSS.get_model_stage_metric(ModelStage.TRAIN), loss, prog_bar=True)
+        self.log_dict(self.train_metrics,prog_bar=True)
         return loss
 
     def validation_step(self, batch, batch_idx):
         loss = self._compute_detection_loss(batch)
         self.log(Metrics.DEFAULT_METRIC_LOSS.get_model_stage_metric(ModelStage.VAL), loss, prog_bar=True, sync_dist=True)
+        self.log_dict(self.train_metrics,prog_bar=True)
+        return loss
+
 
     def _compute_detection_loss(self, batch):
         images, targets = batch
         raw_output = self.forward(images)
         return self.yolo_model.model.loss(raw_output, targets)
 
-    # ======================== YOLO-NATIVE TRAINING ========================
-
-    def set_dataset_config(self, yaml_path: str):
-        path = Path(yaml_path)
-        
-        if not path.exists():
-            raise FileNotFoundError(f"Dataset config not found: {yaml_path}")
-        
-        self.data_yaml_path = path
-        return self
-
-    def train_yolo_native(self, epochs=100, learning_rate=None, 
-                          data_yaml=None, callbacks=None) -> dict:
-        config = data_yaml or self.data_yaml_path
-        
-        if not config:
-            raise ValueError("No dataset config. Call set_dataset_config() first.")
-
-        training_args = self._build_native_training_args(config, epochs, learning_rate)
-
-        logger.info("Starting YOLO-native training...")
-        results = self.yolo_model.train(**training_args)
-        
-        history = self._parse_yolo_results(results)
-        self._replay_callbacks(callbacks or [], history)
-        return history
-
-    def _build_native_training_args(self, config, epochs, learning_rate):
-        NativeTrainingArgs=ModelConstants.NativeTrainingArgs
-        args = {
-            NativeTrainingArgs.DATA_ARG_NAME: str(config),
-            NativeTrainingArgs.EPOCHS_ARG_NAME: epochs,
-            NativeTrainingArgs.IMAGES_ARG_NAME: self.width,
-            NativeTrainingArgs.BATCH_ARG_NAME: ModelConstants.BATCH_SIZE,
-            NativeTrainingArgs.DEVICE_ARG_NAME: "cuda" if torch.cuda.is_available() else "cpu",
-            NativeTrainingArgs.PROJECT_ARG_NAME: "checkpoints",
-            NativeTrainingArgs.MODEL_NAME_ARG_NAME: self.model_name,
-            NativeTrainingArgs.EXIST_OK_ARG_NAME: True,
-            NativeTrainingArgs.VERBOSE_ARG_NAME: True,
-        }
-        
-        if learning_rate:
-            args[NativeTrainingArgs.LR0_ARG_NAME] = learning_rate
-
-        return args
 
     def _parse_yolo_results(self, yolo_results) -> dict:
         csv_path = Path(yolo_results.save_dir) / "results.csv"
