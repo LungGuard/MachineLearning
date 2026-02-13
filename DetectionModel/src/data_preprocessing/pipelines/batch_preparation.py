@@ -6,6 +6,10 @@ The interactive wizard (pipeline_wizard.py) drives configuration;
 this module owns the data-processing logic.
 """
 
+# ── Compatibility patches MUST come before any pylidc-touching import ──
+from pylidc_compat import apply_patches as _apply_compat
+_apply_compat()
+
 import json
 import logging
 import os
@@ -21,17 +25,19 @@ warnings.filterwarnings("ignore")
 
 import pandas as pd
 
-from .config import DataPrepConfig
-from .pylidc_config import configure_pylidc, import_pylidc
-from .data_splitter import split_patients_by_id, get_patient_split
-from .MONAI_scan_processor import CTScanProcessor as MonaiProcessor
-from .dataset_writer import (
+from ..config import DataPrepConfig
+from ..core.pylidc_config import configure_pylidc, import_pylidc
+from ..utils.patient_splitter import split_patients_by_id, get_patient_split
+from .scan_processor import CTScanProcessor
+from ..sources.scan_adapters import PyLIDCScanSource
+from ...utils import NoduleAnnotationProcessor
+from ..io.dataset_writer import (
     save_metadata_csv,
     save_config_json,
     save_yolo_yaml,
     log_summary_statistics,
 )
-from .diagnose_dataset import DatasetDiagnoser
+from ..utils.dataset_diagnostics import DatasetDiagnoser
 from terminal_ui import (
     PipelineMode,
     console,
@@ -201,7 +207,7 @@ class DataPreparationPipeline:
         if not self.scans_to_process:
             raise ValueError("No valid scans found in database!")
 
-        patient_ids = list(set(s.patient_id for s, _ in self.scans_to_process))
+        patient_ids = list({s.patient_id for s, _ in self.scans_to_process})
         self.splits = split_patients_by_id(
             patient_ids,
             self.config.train_ratio,
@@ -258,7 +264,6 @@ class DataPreparationPipeline:
             for scan, _ in self.scans_to_process:
                 dashboard.poll_commands()
 
-                # Abort — stop iterating, finalise with what we have
                 was_aborted = dashboard.aborted
                 if not was_aborted:
                     dashboard.wait_while_paused()
@@ -266,11 +271,9 @@ class DataPreparationPipeline:
 
                 if was_aborted:
                     print_warning("Aborted by user")
-                    # fall through to finally → finalize
                 else:
-                    self._process_one_scan(
-                        scan, processor, dashboard, all_metadata,
-                    )
+                    processor = CTScanProcessor(self.config, self.directories)
+                    self._process_one_scan(scan, processor, dashboard, all_metadata)
         finally:
             dashboard.stop()
 
@@ -295,12 +298,11 @@ class DataPreparationPipeline:
     def _process_one_scan(
         self,
         scan,
-        processor: MonaiProcessor,
+        processor: CTScanProcessor,
         dashboard: LiveDashboard,
         all_metadata: List[Dict],
     ) -> None:
         """Process a single scan, respecting skip. Mutates all_metadata in place."""
-        # Skip request — just advance the counter
         if dashboard.skip_current:
             dashboard.advance(was_error=False)
             logger.info(f"Skipped {scan.patient_id}")
@@ -309,7 +311,8 @@ class DataPreparationPipeline:
 
         split = get_patient_split(scan.patient_id, self.splits)
         try:
-            meta = processor.process_scan(scan, split, pl_module=self.pylidc)
+            source = PyLIDCScanSource(scan, NoduleAnnotationProcessor)
+            meta = processor.process_scan(source, split)
             all_metadata.extend(meta)
             dashboard.advance(scan_images=len(meta))
         except Exception as e:

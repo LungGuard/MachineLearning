@@ -6,6 +6,10 @@ Adds a LiveDashboard with pause/resume/abort support and worker
 warning suppression so Rich output stays clean.
 """
 
+# ── Compatibility patches MUST come first ──
+from pylidc_compat import apply_patches as _apply_compat
+_apply_compat()
+
 import logging
 import os
 import time
@@ -18,14 +22,16 @@ os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
 warnings.filterwarnings("ignore")
 
-from .offline_data_preparation import (
+from .batch_preparation import (
     DataPreparationPipeline,
     DataPrepConfig,
-    MonaiProcessor,
     configure_pylidc,
     get_patient_split,
     import_pylidc,
 )
+from .scan_processor import CTScanProcessor
+from ..sources.scan_adapters import PyLIDCScanSource
+from ...utils import NoduleAnnotationProcessor
 from terminal_ui import (
     PipelineMode,
     print_completion_banner,
@@ -35,7 +41,7 @@ from terminal_ui import (
     print_warning,
 )
 from pipeline_wizard import LiveDashboard, run_interactive_cleanup
-from .diagnose_dataset import DatasetDiagnoser
+from ..utils.dataset_diagnostics import DatasetDiagnoser
 
 logger = logging.getLogger(__name__)
 
@@ -48,16 +54,30 @@ _worker_pylidc = None
 
 def _init_worker(data_path: str) -> None:
     """
-    Initialize each worker: suppress ALL warnings and route logs
-    exclusively to the file handler (no console writes).
+    Initialize each worker process:
+      1. Apply compatibility patches (configparser + numpy)
+      2. Suppress ALL warnings so they don't corrupt Rich output
+      3. Route logs exclusively to file (no console writes)
+      4. Configure its own pylidc connection
     """
     global _worker_pylidc
 
+    # ── Step 1: Compat patches INSIDE the worker process ──
+    import configparser
+    import numpy as np
+    if not hasattr(configparser, "SafeConfigParser"):
+        configparser.SafeConfigParser = configparser.ConfigParser
+    for alias, repl in {"int": np.int64, "float": np.float64, "bool": np.bool_,
+                         "object": np.object_, "str": np.str_}.items():
+        if not hasattr(np, alias):
+            setattr(np, alias, repl)
+
+    # ── Step 2: Suppress warnings ──
     os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
     os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
     warnings.filterwarnings("ignore")
 
-    # Worker logs go only to file — never to Rich console
+    # ── Step 3: Worker logs → file only ──
     root = logging.getLogger()
     root.handlers.clear()
     log_dir = Path("logs")
@@ -71,6 +91,7 @@ def _init_worker(data_path: str) -> None:
     root.addHandler(fh)
     root.setLevel(logging.DEBUG)
 
+    # ── Step 4: Configure pylidc ──
     try:
         configure_pylidc(data_path)
         _worker_pylidc = import_pylidc()
@@ -96,8 +117,9 @@ def _worker_process_scan(args: Tuple) -> List[Dict]:
             .first()
         )
         if scan is not None:
-            processor = MonaiProcessor(config, directories)
-            result = processor.process_scan(scan, patient_split, pl_module=pylidc)
+            processor = CTScanProcessor(config, directories)
+            source = PyLIDCScanSource(scan, NoduleAnnotationProcessor)
+            result = processor.process_scan(source, patient_split)
     except Exception as exc:
         logger.error(f"[{patient_id}] Worker error: {exc}")
 
@@ -116,8 +138,6 @@ def run_parallel_pipeline(
     """
     Orchestrate parallel processing with a LiveDashboard.
     Keyboard controls: [P] Pause  [R] Resume  [Q] Abort
-    (Skip is not supported in parallel mode because imap_unordered
-    does not expose per-scan granularity to the main process.)
     """
 
     # 1. Setup
@@ -164,20 +184,14 @@ def run_parallel_pipeline(
             for result in results_iter:
                 dashboard.poll_commands()
 
-                # Abort — terminate pool, stop iterating
                 if dashboard.aborted:
                     print_warning("Aborted — terminating workers…")
                     pool.terminate()
                     pool.join()
                     was_aborted = True
-                    # imap_unordered will raise on next iteration;
-                    # the finally block handles dashboard.stop()
-                    # We need to exit the for-loop cleanly:
-                    all_metadata.clear()  # partial results unreliable after terminate
-                    # fall through
+                    all_metadata.clear()
 
                 if not was_aborted:
-                    # Pause — block main thread, workers keep finishing queued tasks
                     dashboard.wait_while_paused()
 
                     if result:

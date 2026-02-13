@@ -2,13 +2,17 @@
 LungGuard Data Preparation — Interactive Entry Point.
 
 Run with:
-    python -m DetectionModel.src.data_processing
+    python -m DetectionModel.src.data_preprocessing
 
 Flow:
   1. Startup Wizard  → collects mode, paths, ratios, workers, advanced opts
   2. Live Dashboard   → real-time progress with [P]ause [R]esume [S]kip [Q]uit
   3. Post-Processing → diagnosis, reports, dataset cleanup
 """
+
+# ── Compatibility patches MUST be the very first import ──
+from pylidc_compat import apply_patches as _apply_compat
+_apply_compat()
 
 import sys
 from pathlib import Path
@@ -23,7 +27,6 @@ def main() -> Path:
 
     config_dict = run_wizard()
 
-    # Build DataPrepConfig from wizard output
     config = DataPrepConfig(
         data_path=config_dict["data_path"],
         output_dir=config_dict["output_dir"],
@@ -38,8 +41,8 @@ def main() -> Path:
     )
 
     mode = PipelineMode(config_dict["mode"])
-
     result = _dispatch(mode, config, config_dict.get("num_workers"))
+
     return result
 
 
@@ -49,11 +52,11 @@ def _dispatch(mode: PipelineMode, config: DataPrepConfig, num_workers=None) -> P
     result: Path
 
     if mode == PipelineMode.SERIAL:
-        from .offline_data_preparation import DataPreparationPipeline
+        from .pipelines.batch_preparation import DataPreparationPipeline
         pipeline = DataPreparationPipeline(config)
         result = pipeline.run_serial()
     else:
-        from .parallel_data_preparation import run_parallel_pipeline
+        from .pipelines.parallel_preparation import run_parallel_pipeline
         result = run_parallel_pipeline(config, num_workers=num_workers)
 
     return result
