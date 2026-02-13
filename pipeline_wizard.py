@@ -10,6 +10,8 @@ Keyboard controls during processing:
   [P] Pause   [R] Resume   [S] Skip current scan   [Q] Abort
 """
 
+
+import contextlib
 import logging
 import os
 import select
@@ -215,7 +217,7 @@ class _KeyboardListener(threading.Thread):
 
     def run(self) -> None:
         """Listen for single-character commands on stdin."""
-        try:
+        with contextlib.suppress(Exception):
             # Windows: use msvcrt
             if sys.platform == "win32":
                 import msvcrt
@@ -237,8 +239,6 @@ class _KeyboardListener(threading.Thread):
                             self._handle_key(ch)
                 finally:
                     termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old)
-        except Exception:
-            pass  # graceful degradation if terminal doesn't support raw mode
 
     def _handle_key(self, ch: str) -> None:
         key_map = {

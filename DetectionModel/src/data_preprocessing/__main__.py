@@ -10,7 +10,6 @@ Flow:
   3. Post-Processing → diagnosis, reports, dataset cleanup
 """
 
-# ── Compatibility patches MUST be the very first import ──
 from pylidc_compat import apply_patches as _apply_compat
 _apply_compat()
 

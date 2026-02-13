@@ -250,7 +250,7 @@ class DataPreparationPipeline:
         Supports pause, resume, skip, and abort via keyboard.
         """
         self.setup(mode=PipelineMode.SERIAL)
-        processor = MonaiProcessor(self.config, self.directories)
+        processor = CTScanProcessor(self.config, self.directories)
 
         all_metadata: List[Dict] = []
         total = len(self.scans_to_process)
