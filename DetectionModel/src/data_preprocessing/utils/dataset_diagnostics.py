@@ -31,8 +31,8 @@ logger = logging.getLogger(__name__)
 class AnalysisThresholds:
     """Thresholds for image quality analysis."""
     # Generic quality
-    uniform_std: float = 10.0
-    too_dark_ratio: float = 0.95
+    uniform_std: float = 20.0
+    too_dark_ratio: float = 0.88
     too_bright_mean: float = 180.0
     min_dark_ratio: float = 0.20
     min_contrast_range: int = 100
@@ -42,8 +42,13 @@ class AnalysisThresholds:
     lung_intensity_range: Tuple[int, int] = (10, 90)
     morph_kernel_size: int = 15
     min_lung_contour_area: int = 500
-    min_lung_body_ratio: float = 0.12
-    min_body_ratio: float = 0.15
+    min_lung_body_ratio: float = 0.20
+    min_body_ratio: float = 0.30
+    min_tissue_ratio: float = 0.05
+
+    # Spatial / geometry
+    min_body_aspect_ratio: float = 0.5
+    min_content_coverage: float = 0.5
 
 
 @dataclass
@@ -70,6 +75,12 @@ class ImageAnalysisResult:
     lung_body_ratio: float = 0.0
     lung_region_count: int = 0
 
+    # Spatial / geometry metrics
+    body_aspect_ratio: float = 0.0
+    content_width_ratio: float = 0.0
+    content_height_ratio: float = 0.0
+    content_coverage: float = 0.0
+
     # Diagnosis flags
     is_uniform: bool = False
     is_too_dark: bool = False
@@ -77,6 +88,9 @@ class ImageAnalysisResult:
     is_missing_contrast: bool = False
     has_no_dark_background: bool = False
     has_insufficient_lung: bool = False
+    has_insufficient_tissue: bool = False
+    has_bad_aspect_ratio: bool = False
+    has_low_content_coverage: bool = False
 
     # Verdict
     is_problematic: bool = False
@@ -97,6 +111,9 @@ class DiagnoserDisplay:
         "LOW_CONTRAST": ("🔲", "grey50"),
         "NO_BG": ("🖼️", "magenta"),
         "INSUFFICIENT_LUNG": ("🫁", "red"),
+        "NO_LUNG_TISSUE": ("🔬", "dim red"),
+        "BAD_GEOMETRY": ("📐", "bright_magenta"),
+        "NARROW_CONTENT": ("▮", "bright_yellow"),
         "UNREADABLE": ("❌", "bold red"),
     }
 
@@ -126,12 +143,29 @@ class DiagnoserDisplay:
         table.add_column("Value", style="green", justify="right")
         table.add_column("Description", style="dim")
 
-        table.add_row("min_lung_body_ratio", f"{t.min_lung_body_ratio:.2f}", "Min lung-to-body area ratio")
-        table.add_row("lung_intensity_range", f"{t.lung_intensity_range}", "Pixel range for lung tissue")
-        table.add_row("uniform_std", f"{t.uniform_std:.1f}", "Max std for uniform detection")
-        table.add_row("too_dark_ratio", f"{t.too_dark_ratio:.2f}", "Dark pixel ratio threshold")
-        table.add_row("too_bright_mean", f"{t.too_bright_mean:.1f}", "Mean brightness threshold")
-        table.add_row("min_contrast_range", f"{t.min_contrast_range}", "Min pixel range for contrast")
+        # Generic quality
+        table.add_row("uniform_std", f"{t.uniform_std:.1f}", "Max std allowed (filters blurry, blank, or smooth tissue like liver).")
+        table.add_row("too_dark_ratio", f"{t.too_dark_ratio:.2f}", "Max pure black ratio (filters empty space or scans outside the body).")
+        table.add_row("too_bright_mean", f"{t.too_bright_mean:.1f}", "Max mean brightness (filters overexposed scans or dense bone).")
+        table.add_row("min_dark_ratio", f"{t.min_dark_ratio:.2f}", "Min dark pixel ratio (detects missing background, e.g., cropped scans).")
+        table.add_row("min_contrast_range", f"{t.min_contrast_range}", "Min pixel diff (ensures image sharpness, avoids grey fog).")
+        table.add_row("min_tissue_ratio", f"{t.min_tissue_ratio:.2f}", "Min % of mid-gray tissue (filters black/white artifact smears).")
+
+        table.add_section()
+
+        # Lung content
+        table.add_row("body_intensity_floor", f"{t.body_intensity_floor}", "Min pixel value to be considered patient body vs. background air.")
+        table.add_row("lung_intensity_range", f"{t.lung_intensity_range}", "Pixel intensity range representing spongy lung tissue.")
+        table.add_row("morph_kernel_size", f"{t.morph_kernel_size}", "Kernel size for morphological ops (closes holes in body mask).")
+        table.add_row("min_lung_contour_area", f"{t.min_lung_contour_area}", "Min area for a valid lung region (ignores small noise artifacts).")
+        table.add_row("min_lung_body_ratio", f"{t.min_lung_body_ratio:.2f}", "Min lung-to-body area (filters slices with too little lung, e.g., neck/abdomen).")
+        table.add_row("min_body_ratio", f"{t.min_body_ratio:.2f}", "Min body-to-image area (ensures the patient is actually visible).")
+
+        table.add_section()
+
+        # Spatial / geometry
+        table.add_row("min_body_aspect_ratio", f"{t.min_body_aspect_ratio:.2f}", "Min body bounding-box aspect ratio (filters non-axial sagittal/coronal slices).")
+        table.add_row("min_content_coverage", f"{t.min_content_coverage:.2f}", "Min content spread per axis (filters narrow-strip padding images).")
 
         console.print(table)
         console.print()
@@ -181,7 +215,15 @@ class DiagnoserDisplay:
         lung_table.add_row("Min Lung/Body Ratio", f"{lung.get('min_lung_body_ratio', 0):.3f}")
         lung_table.add_row("Flagged Insufficient Lung", f"{lung.get('flagged_insufficient_lung', 0):,}")
 
-        console.print(Panel(lung_table, title="🫁 Lung Content Analysis", border_style="blue", box=box.ROUNDED))
+        # Geometry stats
+        geo = summary.get("geometry_stats", {})
+        lung_table.add_row("", "")
+        lung_table.add_row("Mean Body Aspect Ratio", f"{geo.get('mean_body_aspect_ratio', 0):.3f}")
+        lung_table.add_row("Mean Content Coverage", f"{geo.get('mean_content_coverage', 0):.3f}")
+        lung_table.add_row("Flagged Bad Geometry", f"{geo.get('flagged_bad_geometry', 0):,}")
+        lung_table.add_row("Flagged Narrow Content", f"{geo.get('flagged_narrow_content', 0):,}")
+
+        console.print(Panel(lung_table, title="🫁 Lung & Geometry Analysis", border_style="blue", box=box.ROUNDED))
 
         breakdown = summary.get("problem_breakdown", {})
         cls._print_problem_breakdown(breakdown) if breakdown else None
@@ -466,6 +508,7 @@ class DatasetDiagnoser:
         bright_ratio = bright / total
 
         lung_metrics = self._compute_lung_metrics(gray)
+        geo_metrics = self._compute_geometry_metrics(gray)
 
         is_uniform = std_val < t.uniform_std
         is_too_dark = dark_ratio > t.too_dark_ratio
@@ -473,13 +516,19 @@ class DatasetDiagnoser:
         is_missing_contrast = (max_val - min_val) < t.min_contrast_range
         has_no_dark_background = dark_ratio < t.min_dark_ratio and mean_val > 100
         has_insufficient_lung = lung_metrics['lung_body_ratio'] < t.min_lung_body_ratio
+        has_insufficient_tissue = mid_ratio < t.min_tissue_ratio
+        has_bad_aspect_ratio = geo_metrics['body_aspect_ratio'] < t.min_body_aspect_ratio
+        has_low_content_coverage = geo_metrics['content_coverage'] < t.min_content_coverage
 
         problem_checks = [
+            (has_insufficient_tissue, "NO_LUNG_TISSUE"),
             (is_uniform, "UNIFORM"),
             (is_too_dark, "TOO_DARK"),
             (is_too_bright, "TOO_BRIGHT"),
             (is_missing_contrast and not is_uniform, "LOW_CONTRAST"),
             (has_no_dark_background and not is_too_bright, "NO_BG"),
+            (has_bad_aspect_ratio, "BAD_GEOMETRY"),
+            (has_low_content_coverage and not has_bad_aspect_ratio, "NARROW_CONTENT"),
             (has_insufficient_lung, "INSUFFICIENT_LUNG"),
         ]
         problems = list(map(lambda p: p[1], filter(lambda p: p[0], problem_checks)))
@@ -494,10 +543,17 @@ class DatasetDiagnoser:
             body_ratio=round(lung_metrics['body_ratio'], 3),
             lung_body_ratio=round(lung_metrics['lung_body_ratio'], 3),
             lung_region_count=lung_metrics['lung_region_count'],
+            body_aspect_ratio=round(geo_metrics['body_aspect_ratio'], 3),
+            content_width_ratio=round(geo_metrics['content_width_ratio'], 3),
+            content_height_ratio=round(geo_metrics['content_height_ratio'], 3),
+            content_coverage=round(geo_metrics['content_coverage'], 3),
             is_uniform=is_uniform, is_too_dark=is_too_dark, is_too_bright=is_too_bright,
             is_missing_contrast=is_missing_contrast,
             has_no_dark_background=has_no_dark_background,
             has_insufficient_lung=has_insufficient_lung,
+            has_insufficient_tissue=has_insufficient_tissue,
+            has_bad_aspect_ratio=has_bad_aspect_ratio,
+            has_low_content_coverage=has_low_content_coverage,
             is_problematic=len(problems) > 0,
             problem_type="; ".join(problems) if problems else "OK"
         )
@@ -528,6 +584,38 @@ class DatasetDiagnoser:
             "body_ratio": body_ratio,
             "lung_body_ratio": lung_body_ratio,
             "lung_region_count": len(significant),
+        }
+
+    def _compute_geometry_metrics(self, gray: np.ndarray) -> Dict:
+        """Compute spatial geometry metrics to detect non-axial / narrow-strip images."""
+        t = self.thresholds
+        h, w = gray.shape
+
+        # ── Body aspect ratio via bounding rect of body contour ──
+        body_mask = (gray > t.body_intensity_floor).astype(np.uint8) * 255
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (t.morph_kernel_size, t.morph_kernel_size))
+        body_mask = cv2.morphologyEx(body_mask, cv2.MORPH_CLOSE, kernel)
+        body_mask = cv2.morphologyEx(body_mask, cv2.MORPH_OPEN, kernel)
+
+        contours, _ = cv2.findContours(body_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        body_aspect_ratio = 0.0
+        largest = max(contours, key=cv2.contourArea, default=None) if contours else None
+        _, _, bw, bh = cv2.boundingRect(largest) if largest is not None else (0, 0, 0, 0)
+        body_aspect_ratio = min(bw, bh) / max(bw, bh) if max(bw, bh) > 0 else 0.0
+
+        # ── Content coverage: how much of each axis has non-padding pixels ──
+        cols_with_content = np.any(gray > t.body_intensity_floor, axis=0)
+        rows_with_content = np.any(gray > t.body_intensity_floor, axis=1)
+        content_width_ratio = float(np.sum(cols_with_content)) / w if w > 0 else 0.0
+        content_height_ratio = float(np.sum(rows_with_content)) / h if h > 0 else 0.0
+        content_coverage = min(content_width_ratio, content_height_ratio)
+
+        return {
+            "body_aspect_ratio": body_aspect_ratio,
+            "content_width_ratio": content_width_ratio,
+            "content_height_ratio": content_height_ratio,
+            "content_coverage": content_coverage,
         }
 
     # ── Metadata & Filename Parsing ───────────
@@ -577,6 +665,12 @@ class DatasetDiagnoser:
                 "min_lung_body_ratio": round(df['lung_body_ratio'].min(), 3),
                 "flagged_insufficient_lung": int(df['has_insufficient_lung'].sum()),
             },
+            "geometry_stats": {
+                "mean_body_aspect_ratio": round(df['body_aspect_ratio'].mean(), 3),
+                "mean_content_coverage": round(df['content_coverage'].mean(), 3),
+                "flagged_bad_geometry": int(df['has_bad_aspect_ratio'].sum()),
+                "flagged_narrow_content": int(df['has_low_content_coverage'].sum()),
+            },
             "split_breakdown": {},
         }
 
@@ -603,6 +697,8 @@ class DatasetDiagnoser:
             total_images=('is_problematic', 'count'),
             bad_images=('is_problematic', 'sum'),
             mean_lung_ratio=('lung_body_ratio', 'mean'),
+            mean_body_aspect=('body_aspect_ratio', 'mean'),
+            mean_content_coverage=('content_coverage', 'mean'),
         ).reset_index()
 
         nodule_stats['is_valid'] = nodule_stats['bad_images'] == 0
@@ -617,6 +713,8 @@ class DatasetDiagnoser:
             problematic_count=('is_problematic', 'sum'),
             total_count=('is_problematic', 'count'),
             mean_lung_ratio=('lung_body_ratio', 'mean'),
+            mean_body_aspect=('body_aspect_ratio', 'mean'),
+            mean_content_coverage=('content_coverage', 'mean'),
         ).reset_index()
 
         patient_stats['problematic_ratio'] = patient_stats['problematic_count'] / patient_stats['total_count']
@@ -726,6 +824,94 @@ class DatasetDiagnoser:
 # Interactive CLI
 # ──────────────────────────────────────────────
 
+def edit_thresholds_interactive(thresholds: AnalysisThresholds) -> AnalysisThresholds:
+    """Interactive threshold editor."""
+    console.print("\n  [bold cyan]Threshold Editor[/bold cyan]")
+    console.print("  [dim]Select parameters to modify (or press Enter to skip)[/dim]\n")
+    
+    # Define threshold groups with their fields
+    threshold_options = {
+        "1": ("uniform_std", "Max std for uniform images", float),
+        "2": ("too_dark_ratio", "Max dark pixel ratio", float),
+        "3": ("too_bright_mean", "Max mean brightness", float),
+        "4": ("min_dark_ratio", "Min dark pixel ratio", float),
+        "5": ("min_contrast_range", "Min contrast range", int),
+        "6": ("min_tissue_ratio", "Min tissue ratio", float),
+        "7": ("body_intensity_floor", "Body intensity floor", int),
+        "8": ("lung_intensity_range", "Lung intensity range (min,max)", tuple),
+        "9": ("morph_kernel_size", "Morphology kernel size", int),
+        "10": ("min_lung_contour_area", "Min lung contour area", int),
+        "11": ("min_lung_body_ratio", "Min lung/body ratio", float),
+        "12": ("min_body_ratio", "Min body ratio", float),
+        "13": ("min_body_aspect_ratio", "Min body aspect ratio", float),
+        "14": ("min_content_coverage", "Min content coverage", float),
+    }
+    
+    # Display options
+    table = Table(box=box.SIMPLE, show_header=False, padding=(0, 2))
+    table.add_column("No.", style="cyan", width=4)
+    table.add_column("Parameter", style="white")
+    table.add_column("Current Value", style="green", justify="right")
+    
+    for num, (field, desc, _) in threshold_options.items():
+        current_val = getattr(thresholds, field)
+        table.add_row(num, desc, str(current_val))
+    
+    console.print(table)
+    console.print()
+    
+    # Get selection
+    selection = Prompt.ask(
+        "  Enter parameter numbers to edit (comma-separated, or 'all')",
+        default="none"
+    ).strip().lower()
+    
+    if selection == "none" or not selection:
+        console.print("  [dim]No changes made[/dim]\n")
+        return thresholds
+    
+    # Parse selection
+    if selection == "all":
+        to_edit = list(threshold_options.keys())
+    else:
+        to_edit = [s.strip() for s in selection.split(",") if s.strip() in threshold_options]
+    
+    if not to_edit:
+        console.print("  [yellow]No valid selections[/yellow]\n")
+        return thresholds
+    
+    console.print()
+    
+    # Edit selected thresholds
+    for num in to_edit:
+        field, desc, val_type = threshold_options[num]
+        current_val = getattr(thresholds, field)
+        
+        if val_type == tuple:
+            # Special handling for lung_intensity_range
+            prompt_text = f"  {desc} [dim](current: {current_val})[/dim]"
+            new_val_str = Prompt.ask(prompt_text, default=f"{current_val[0]},{current_val[1]}")
+            try:
+                parts = new_val_str.split(",")
+                new_val = (int(parts[0].strip()), int(parts[1].strip()))
+                setattr(thresholds, field, new_val)
+                console.print(f"    ✓ Updated to {new_val}", style="green")
+            except (ValueError, IndexError):
+                console.print(f"    ✗ Invalid format, keeping {current_val}", style="red")
+        else:
+            prompt_text = f"  {desc} [dim](current: {current_val})[/dim]"
+            new_val_str = Prompt.ask(prompt_text, default=str(current_val))
+            try:
+                new_val = val_type(new_val_str)
+                setattr(thresholds, field, new_val)
+                console.print(f"    ✓ Updated to {new_val}", style="green")
+            except ValueError:
+                console.print(f"    ✗ Invalid value, keeping {current_val}", style="red")
+    
+    console.print()
+    return thresholds
+
+
 def run_interactive() -> None:
     """Interactive terminal interface for the diagnoser."""
     DiagnoserDisplay.print_banner()
@@ -741,8 +927,17 @@ def run_interactive() -> None:
     console.print()
 
     # Step 2: Initialize and show thresholds
-    diagnoser = DatasetDiagnoser(dataset_path)
+    thresholds = AnalysisThresholds()
+    diagnoser = DatasetDiagnoser(dataset_path, thresholds)
     diagnoser.display.print_thresholds(diagnoser.thresholds)
+    
+    # Step 2.5: Ask if user wants to modify thresholds
+    modify = Confirm.ask("  ✏️  Would you like to modify any thresholds?", default=False)
+    if modify:
+        thresholds = edit_thresholds_interactive(thresholds)
+        diagnoser = DatasetDiagnoser(dataset_path, thresholds)
+        console.print("  [bold green]✓[/bold green] Updated thresholds:\n")
+        diagnoser.display.print_thresholds(thresholds)
 
     # Step 3: Analyze
     console.rule("[bold cyan]Phase 1: Analysis[/bold cyan]", style="cyan")

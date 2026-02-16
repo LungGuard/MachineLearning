@@ -18,11 +18,11 @@ __pycache__/
 .claude
 
 # Local datasets and cache
-datasets/
+datasets*
 ClassificationModel/datasets/
 DetectionModel/datasets/
 DetectionModel/datasets_monai/
-DetectionModel/dataset*
+DetectionModel/datasets*
 
 # Training artifacts (keep directory structure)
 logs/*

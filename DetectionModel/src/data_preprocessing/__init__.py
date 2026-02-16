@@ -40,9 +40,8 @@ from .preprocessing import (
 # Pipelines
 from .pipelines import (
     CTScanProcessor,
-    prepare_dataset,
-    prepare_dataset_from_config_dict,
-    prepare_dataset_parallel,
+    DataPreparationPipeline,
+    run_parallel_pipeline,
     InferencePipeline,
 )
 
@@ -90,9 +89,8 @@ __all__ = [
     'SlicePreprocessor',
     # Pipelines
     'CTScanProcessor',
-    'prepare_dataset',
-    'prepare_dataset_from_config_dict',
-    'prepare_dataset_parallel',
+    'DataPreparationPipeline',
+    'run_parallel_pipeline',
     'InferencePipeline',
     # I/O
     'save_image',
