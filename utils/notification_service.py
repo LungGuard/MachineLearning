@@ -26,10 +26,11 @@ class NtfyNotificationService:
 
     
     def send_message(self, msg, title=None, priority=NotificationPriority.DEFAULT, tags=None):
-        headers = {NotificationHeaders.PRIORITY_HEADER: priority}
-        headers[NotificationHeaders.TITLE_HEADER] = title or NotificationFields.DEFAULT_TITLE
-        headers[NotificationHeaders.TAGS_HEADER] = ",".join(tags) if tags else ""
-        
+        headers = {
+            NotificationHeaders.PRIORITY_HEADER: priority,
+            NotificationHeaders.TITLE_HEADER: title or NotificationFields.DEFAULT_TITLE,
+            NotificationHeaders.TAGS_HEADER: ",".join(tags) if tags else "",
+        }
         response = requests.post(
             self.url,
             data=msg.encode('utf-8'),

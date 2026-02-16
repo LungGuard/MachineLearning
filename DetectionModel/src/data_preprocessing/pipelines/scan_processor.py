@@ -3,9 +3,10 @@
 Composes the extracted modules into a unified API:
 ─────────────────────────────────────────────────────────────────
   CTScanProcessor
-    ├── VolumePreprocessingPipeline   (volume_preprocessing.py)
-    ├── SliceQualityGate              (slice_quality.py)
-    ├── InferencePipeline             (inference_pipeline.py)
+    ├── VolumePreprocessingPipeline   (preprocessing/volume_processor.py)
+    ├── SliceQualityGate              (preprocessing/slice_quality_gate.py)
+    ├── BoundingBoxConverter          (preprocessing/bbox_converter.py)
+    ├── InferencePipeline             (pipelines/inference_processor.py)
     └── Data-prep logic               (this file)
 ─────────────────────────────────────────────────────────────────
 
@@ -24,10 +25,7 @@ import numpy as np
 
 from constants.detection.dataset_constants import DatasetConstants
 
-from ...utils import (
-    VolumePreprocessor,
-    BoundingBoxConverter,
-)
+from ..preprocessing.bbox_converter import BoundingBoxConverter
 
 from ..core.scan_protocols import ScanSource, VolumeData, NoduleData
 from ..preprocessing.slice_quality_gate import SliceQualityGate, SliceQualityConfig
@@ -160,8 +158,8 @@ class CTScanProcessor:
         try:
             context = f"n{nodule.index:02d}_z{slice_idx:04d}"
 
-            # ── Shared core (reuses inference pipeline's internal method) ──
-            enhanced, crop_info, passed, reason = self.inference._prepare_slice_image(
+            # ── Shared core (reuses inference pipeline's public method) ──
+            enhanced, crop_info, passed, reason = self.inference.prepare_slice_image(
                 slice_idx, volume, patient_id, context
             )
 

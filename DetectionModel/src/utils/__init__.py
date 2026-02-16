@@ -1,12 +1,15 @@
 """
 Detection Model Utilities Package
-Exports all utility classes for easy importing.
+
+Re-exports from canonical locations in data_preprocessing package.
+These classes were moved into data_preprocessing for better organization.
 """
 
-from .volume_preprocessor import VolumePreprocessor
-from .coordinate_transformer import CoordinateTransformer
-from .bounding_box_converter import BoundingBoxConverter
-from .nodule_annotation_processor import NoduleAnnotationProcessor
+# Re-export from new canonical locations
+from ..data_preprocessing.preprocessing.slice_processor import SlicePreprocessor as VolumePreprocessor
+from ..data_preprocessing.core.coordinate_transformer import CoordinateTransformer
+from ..data_preprocessing.preprocessing.bbox_converter import BoundingBoxConverter
+from ..data_preprocessing.sources.annotation_processor import NoduleAnnotationProcessor
 
 # Export all classes
 __all__ = [

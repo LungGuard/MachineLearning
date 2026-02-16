@@ -9,6 +9,7 @@ from .scan_protocols import (
     NoduleCropResult,
 )
 from .pylidc_config import configure_pylidc, import_pylidc
+from .coordinate_transformer import CoordinateTransformer
 
 __all__ = [
     'ScanSource',
@@ -19,4 +20,5 @@ __all__ = [
     'NoduleCropResult',
     'configure_pylidc',
     'import_pylidc',
+    'CoordinateTransformer',
 ]

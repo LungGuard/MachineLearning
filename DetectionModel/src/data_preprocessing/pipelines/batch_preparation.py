@@ -6,6 +6,8 @@ The interactive wizard (pipeline_wizard.py) drives configuration;
 this module owns the data-processing logic.
 """
 
+
+import contextlib
 # ── Compatibility patches MUST come before any pylidc-touching import ──
 from pylidc_compat import apply_patches as _apply_compat
 _apply_compat()
@@ -30,7 +32,7 @@ from ..core.pylidc_config import configure_pylidc, import_pylidc
 from ..utils.patient_splitter import split_patients_by_id, get_patient_split
 from .scan_processor import CTScanProcessor
 from ..sources.scan_adapters import PyLIDCScanSource
-from ...utils import NoduleAnnotationProcessor
+from ..sources.annotation_processor import NoduleAnnotationProcessor
 from ..io.dataset_writer import (
     save_metadata_csv,
     save_config_json,
@@ -81,8 +83,7 @@ def create_directory_structure(output_dir: str) -> Dict[str, Path]:
 
     for name, path in directories.items():
         is_metadata = name == "metadata"
-        should_wipe = path.exists() and not is_metadata
-        if should_wipe:
+        if should_wipe := path.exists() and not is_metadata:
             shutil.rmtree(path)
         path.mkdir(parents=True, exist_ok=True)
         if is_metadata:
@@ -106,12 +107,10 @@ def filter_scans_with_nodules(all_scans: List, pylidc_module) -> List[Tuple]:
     with create_filter_progress() as progress:
         task = progress.add_task("Filtering scans for nodules", total=total)
         for scan in all_scans:
-            try:
+            with contextlib.suppress(Exception):
                 clusters = scan.cluster_annotations()
                 if len(clusters) > 0:
                     scans_with_nodules.append((scan, clusters))
-            except Exception:
-                pass
             progress.advance(task)
 
     print_success(
@@ -187,7 +186,7 @@ class DataPreparationPipeline:
         with create_filter_progress() as progress:
             task = progress.add_task("Loading patient scans", total=len(patient_ids))
             for pid in patient_ids:
-                try:
+                with contextlib.suppress(Exception):
                     scans = (
                         self.pylidc.query(self.pylidc.Scan)
                         .filter(self.pylidc.Scan.patient_id == pid)
@@ -196,8 +195,6 @@ class DataPreparationPipeline:
                     for s in scans:
                         if len(s.cluster_annotations()) > 0:
                             self.scans_to_process.append((s, s.cluster_annotations()))
-                except Exception:
-                    pass
                 progress.advance(task)
 
     def _create_new_splits(self, splits_json: Path) -> None:

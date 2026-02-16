@@ -1,7 +1,8 @@
 """
-Volume Preprocessor Module
+Slice Processor Module
 
-Utilities for preprocessing CT volume data.
+Utilities for preprocessing CT slices and volume data.
+Provides 2.5D sandwich creation, center cropping, resizing, and volume cleaning.
 Optimized for LIDC-IDRI dataset (pre-calibrated HU).
 """
 
@@ -15,7 +16,7 @@ from constants.detection.dataset_constants import PreProcessingConstants
 logger = logging.getLogger(__name__)
 
 
-class VolumePreprocessor:
+class SlicePreprocessor:
     """Utilities for preprocessing CT volume data."""
 
     @staticmethod
@@ -327,12 +328,12 @@ class VolumePreprocessor:
 
         if target_size is not None:
             if use_center_crop:
-                rgb_image, scale, crop_offset = VolumePreprocessor.center_crop_slice(
+                rgb_image, scale, crop_offset = SlicePreprocessor.center_crop_slice(
                     rgb_image, target_size
                 )
                 crop_info = (scale, crop_offset)
             else:
-                rgb_image = VolumePreprocessor.resize_slice_to_target(
+                rgb_image = SlicePreprocessor.resize_slice_to_target(
                     rgb_image,
                     target_size=target_size,
                     preserve_aspect_ratio=True,

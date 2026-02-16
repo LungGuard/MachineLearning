@@ -6,8 +6,8 @@ Utilities for processing nodule annotations from radiologists.
 import numpy as np
 from typing import Tuple, Optional, List
 from constants.detection.dataset_constants import DatasetConstants
-from .coordinate_transformer import CoordinateTransformer
-from .bounding_box_converter import BoundingBoxConverter
+from ..core.coordinate_transformer import CoordinateTransformer
+from ..preprocessing.bbox_converter import BoundingBoxConverter
 
 
 class NoduleAnnotationProcessor:

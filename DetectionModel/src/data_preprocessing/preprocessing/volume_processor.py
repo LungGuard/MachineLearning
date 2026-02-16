@@ -71,7 +71,6 @@ class VolumePreprocessingPipeline:
         final_volume = windowed[0].numpy()
         return final_volume, final_volume.shape, original_spacing
 
-    # ── Resampling ────────────────────────────
 
     def _resample(self, volume_tensor: torch.Tensor,
                   original_spacing: Tuple[float, float, float]) -> torch.Tensor:
@@ -87,7 +86,6 @@ class VolumePreprocessingPipeline:
         )
         return zoomer(volume_tensor)
 
-    # ── Lung Windowing ────────────────────────
 
     def _apply_lung_window(self, volume_tensor: torch.Tensor) -> torch.Tensor:
         """Apply lung window and normalize intensity to [0, 1]."""
@@ -103,7 +101,6 @@ class VolumePreprocessingPipeline:
         )
         return scaler(volume_tensor)
 
-    # ── Cleaning ──────────────────────────────
 
     def _clean_with_offset_detection(self, volume: np.ndarray,
                                       patient_id: str) -> np.ndarray:

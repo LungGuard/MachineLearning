@@ -17,7 +17,7 @@ import numpy as np
 from ..core.scan_protocols import YOLODetection, ProcessedSlice, NoduleCropResult
 from ..preprocessing.slice_quality_gate import SliceQualityGate
 
-from ...utils import VolumePreprocessor
+from ..preprocessing.slice_processor import SlicePreprocessor
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +27,7 @@ class InferencePipeline:
 
     Depends on:
       - SliceQualityGate for CLAHE + validation
-      - VolumePreprocessor for 2.5D sandwich creation
+      - SlicePreprocessor for 2.5D sandwich creation
       - config for output_image_size, use_center_crop
     """
 
@@ -44,7 +44,7 @@ class InferencePipeline:
                                      patient_id: str = "") -> ProcessedSlice:
         """Process one volume slice → in-memory ProcessedSlice."""
         context = f"inf_z{slice_idx:04d}"
-        enhanced, _crop_info, passed, reason = self._prepare_slice_image(
+        enhanced, _crop_info, passed, reason = self.prepare_slice_image(
             slice_idx, volume, patient_id, context
         )
 
@@ -54,14 +54,13 @@ class InferencePipeline:
             else np.array([])
         )
 
-        result = ProcessedSlice(
+        return ProcessedSlice(
             slice_index=slice_idx,
             enhanced_25d=enhanced if enhanced is not None else np.array([]),
             middle_slice=middle,
             quality_passed=passed,
             reject_reason=reason,
         )
-        return result
 
     def prepare_slices_for_yolo(self, volume: np.ndarray,
                                  patient_id: str = "",
@@ -134,18 +133,18 @@ class InferencePipeline:
         Input:  (H, W, 3) — [slice-1, slice, slice+1]
         Output: (H, W)    — the actual center slice for CNN classifier
         """
-        result = (
+        return (
             image_25d[:, :, image_25d.shape[2] // 2]
             if len(image_25d.shape) == 3
             else image_25d
         )
-        return result
 
     # ══════════════════════════════════════════
     #  Shared Core — 2.5D + CLAHE (no I/O)
+    #  Used by both InferencePipeline and CTScanProcessor
     # ══════════════════════════════════════════
 
-    def _prepare_slice_image(self, slice_idx: int, volume: np.ndarray,
+    def prepare_slice_image(self, slice_idx: int, volume: np.ndarray,
                               patient_id: str,
                               context: str = "") -> Tuple[Optional[np.ndarray], Optional[tuple], bool, str]:
         """Create 2.5D sandwich → CLAHE + quality gate.
@@ -158,7 +157,7 @@ class InferencePipeline:
         target_size = getattr(self.config, 'output_image_size', (512, 512))
         use_center_crop = getattr(self.config, 'use_center_crop', True)
 
-        image_25d, crop_info = VolumePreprocessor.create_25d_sandwich(
+        image_25d, crop_info = SlicePreprocessor.create_25d_sandwich(
             volume, slice_idx,
             target_size=target_size,
             use_center_crop=use_center_crop,
@@ -220,14 +219,12 @@ class InferencePipeline:
                 else (crop_25d, crop_single)
             )
 
-            result = NoduleCropResult(
+            return NoduleCropResult(
                 detection=detection,
                 full_slice_enhanced=enhanced,
                 nodule_crop_single=crop_single_final,
                 nodule_crop_25d=crop_25d_final,
             )
-            return result
-
         except Exception as e:
             self.logger.error(
                 f"[{patient_id}] Crop extraction failed for slice {detection.slice_index}: {e}"

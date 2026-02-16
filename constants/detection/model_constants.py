@@ -5,24 +5,10 @@ class DetectionModelConstants:
     PROJECT_ROOT = Path(__file__).parents[2]
     DATASET_DIR=PROJECT_ROOT / "datasets"
     MODEL_NAME = "Detection Model"
-    LEARNING_RATE = 0.001
+    LEARNING_RATE = 1e-4
     BATCH_SIZE = 16 
     DATASET_YAML = DATASET_DIR/ "data.yaml"  
-
-    DEFAULT_INPUT_SIZE=(3, 640, 640)
-    DEFAULT_CONFIDENCE_THRESHOLD=0.25
-
-    class NativeTrainingArgs:
-        DATA_ARG_NAME="data"
-        EPOCHS_ARG_NAME = "epochs"
-        IMAGES_ARG_NAME = "imgsz"
-        BATCH_ARG_NAME = "batch"
-        DEVICE_ARG_NAME = "device"
-        PROJECT_ARG_NAME = "project"
-        MODEL_NAME_ARG_NAME = "name"
-        EXIST_OK_ARG_NAME = "exist_ok"
-        VERBOSE_ARG_NAME = "verbose"
-        LR0_ARG_NAME="lr0"
+    
     class Results:
         BOUNDING_BOXES_KEY = "bounding_boxes"
         CONFIDENCE_SCORES_KEY = "confidence_scores"

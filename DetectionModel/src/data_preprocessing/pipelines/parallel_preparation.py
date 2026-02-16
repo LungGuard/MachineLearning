@@ -31,7 +31,7 @@ from .batch_preparation import (
 )
 from .scan_processor import CTScanProcessor
 from ..sources.scan_adapters import PyLIDCScanSource
-from ...utils import NoduleAnnotationProcessor
+from ..sources.annotation_processor import NoduleAnnotationProcessor
 from terminal_ui import (
     PipelineMode,
     print_completion_banner,

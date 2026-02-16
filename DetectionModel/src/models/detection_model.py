@@ -1,193 +1,164 @@
-from pathlib import Path
-from typing import Optional, List
+import lightning as L
 import torch
-import torch.nn as nn
-import pandas as pd
+import torch.optim as optim
 import logging
-from ultralytics import YOLO
-import numpy as np
-from torchvision.transforms.functional import to_tensor
-from constants.detection.model_constants import DetectionModelConstants as ModelConstants, YoloVariant
-from constants.common.metrics_constants import Metrics
-from constants.common.model_stages import ModelStage
-from utils.base_pt_cnn_model import BaseCNNModel
-
+from ultralytics.nn.tasks import DetectionModel
+from ultralytics.utils.loss import v8DetectionLoss
+from ultralytics.utils.ops import non_max_suppression
 
 logger = logging.getLogger(__name__)
 
-
-class NodulesDetectionModel(BaseCNNModel):
-    """
-    YOLO-based nodule detection for LungGuard Stage 1.
-    
-    Two training modes:
-        1. YOLO-native: model.train_yolo_native() — uses Ultralytics trainer
-        2. Lightning:   trainer.fit(model, loader) — uses Lightning loop
-    """
-
-    NODULE_CLASS_COUNT = 1
-
+class NodulesDetectionModel(L.LightningModule):
     def __init__(self, 
-                 input_shape: tuple =ModelConstants.DEFAULT_INPUT_SIZE,
-                 learning_rate: float = None,
-                 additional_layers = None,
-                 freeze_backbone: bool = True,
-                 callbacks=None,
-                 metrics=None,
-                 **kwargs):
-
-        self.additional_layers = additional_layers or []
-        self.should_freeze_backbone = freeze_backbone
-        self.yolo_model = None
-        self.data_yaml_path = None
-
-        super().__init__(
-            input_shape=input_shape,
-            model_name=ModelConstants.MODEL_NAME,
-            num_classes=self.NODULE_CLASS_COUNT,
-            learning_rate=learning_rate or ModelConstants.LEARNING_RATE,
-            metrics=None,
-            callbacks=callbacks,
-            **kwargs
-        )
-
-    # ======================== MODEL BUILDING ========================
-
-    def _build_model(self):
-        self.yolo_model = YOLO(YoloVariant.YOLO_LARGE.preset)
+                 model_yaml_path: str = "yolov8l.yaml", 
+                 pretrained_weights: str = "yolov8l.pt", 
+                 num_classes: int = 1,
+                 learning_rate: float = 1e-4):
         
-        self._apply_backbone_freeze()
-        self._apply_additional_layers()
+        super().__init__()
+        self.save_hyperparameters()
+        self.learning_rate = learning_rate
+        
+        self.model = DetectionModel(cfg=model_yaml_path, nc=num_classes)
+        
+        if pretrained_weights:
+            self._load_weights(pretrained_weights)
+            
+        self.loss_fn = v8DetectionLoss(self.model)
 
-    def _apply_backbone_freeze(self):
-        if self.should_freeze_backbone:
-            self._set_backbone_grad(requires_grad=False)
-
-    def _apply_additional_layers(self):
-        self.features.extend(self.additional_layers)
-        layer_count = len(self.additional_layers)
-        extra_msg = f" + {layer_count} custom layers" if layer_count > 0 else ""
-        logger.info(f"Built: YOLO-{YoloVariant.YOLO_LARGE.preset}{extra_msg}")
-
-    # ======================== FORWARD ========================
+    def _load_weights(self, weights_path):
+        try:
+            ckpt = torch.load(weights_path, map_location='cpu')
+            state_dict = ckpt['model'].float().state_dict() if 'model' in ckpt else ckpt
+            self.model.load_state_dict(state_dict, strict=False)
+            logger.info(f"Successfully loaded weights from {weights_path}")
+        except Exception as e:
+            logger.warning(f"Failed to load weights: {e}. Training from scratch.")
 
     def forward(self, x):
-        out = self.yolo_model.model(x)
-
-        for layer in self.features:
-            out = layer(out)
-
-        return out
-
-    # ======================== LIGHTNING TRAINING ========================
+        return self.model(x)
 
     def training_step(self, batch, batch_idx):
-        loss = self._compute_detection_loss(batch)
-        self.log(Metrics.DEFAULT_METRIC_LOSS.get_model_stage_metric(ModelStage.TRAIN), loss, prog_bar=True)
-        self.log_dict(self.train_metrics,prog_bar=True)
+        imgs, targets = batch
+        preds = self.model(imgs)
+        
+        # חישוב ה-Loss. שימו לב: v8DetectionLoss מחזירה טנסור Loss ופריטים לפירוט
+        loss, loss_items = self.loss_fn(preds, batch)
+        
+        self.log("train/loss", loss, prog_bar=True)
+        self.log("train/box_loss", loss_items[0])
+        self.log("train/cls_loss", loss_items[1])
         return loss
 
     def validation_step(self, batch, batch_idx):
-        loss = self._compute_detection_loss(batch)
-        self.log(Metrics.DEFAULT_METRIC_LOSS.get_model_stage_metric(ModelStage.VAL), loss, prog_bar=True, sync_dist=True)
-        self.log_dict(self.train_metrics,prog_bar=True)
+        imgs, targets = batch
+        preds = self.model(imgs)
+        loss, loss_items = self.loss_fn(preds, batch)
+        self.log("val/loss", loss, prog_bar=True, sync_dist=True)
         return loss
 
 
-    def _compute_detection_loss(self, batch):
-        images, targets = batch
-        raw_output = self.forward(images)
-        return self.yolo_model.model.loss(raw_output, targets)
-
-
-    def _parse_yolo_results(self, yolo_results) -> dict:
-        csv_path = Path(yolo_results.save_dir) / "results.csv"
-        empty_history = {Metrics.DEFAULT_METRIC_LOSS.get_metric_variant(ModelStage.TRAIN): [],
-                         Metrics.DEFAULT_METRIC_LOSS.get_metric_variant(ModelStage.VAL): []}
+    def predict_step(self, batch, batch_idx, dataloader_idx=0):
+        """
+        Main entry point for inference.
+        Orchestrates detection, conversion to XYHW, and crop extraction.
+        """
+        stacked_slices_batch, _ = batch 
         
-        has_csv = csv_path.exists()
-        df = pd.read_csv(csv_path) if has_csv else None
+        # 1. חיזוי גולמי מהמודל
+        raw_predictions = self.model(stacked_slices_batch)
         
-        result = empty_history
+        # 2. סינון תוצאות (NMS) - מחזיר [x1, y1, x2, y2, conf, cls]
+        refined_detections = self._filter_detections(raw_predictions)
         
-        parsed = self._extract_loss_columns(df) if has_csv else empty_history
-        result = parsed if has_csv else result
-        return result
+        # 3. עיבוד ה-Batch למבנה הסופי (XYHW + Crops)
+        return self._format_batch_results(stacked_slices_batch, refined_detections, batch_idx)
 
-    def _extract_loss_columns(self, df):
-        df.columns = [col.strip() for col in df.columns]
-        train_col = f"train/{Metrics.DEFAULT_METRIC_LOSS.get_metric_variant("box")}"
-        val_col = f"val/{Metrics.DEFAULT_METRIC_LOSS.get_metric_variant("box")}"
+    def _filter_detections(self, predictions):
+        return non_max_suppression(predictions, conf_thres=0.25, iou_thres=0.45)
+
+    def _format_batch_results(self, batch_images, detections_list, batch_idx):
+        batch_results = []
+        for i, detections in enumerate(detections_list):
+            sample_data = self._process_single_sample(
+                full_sandwich=batch_images[i],
+                detections=detections,
+                sample_idx=i,
+                batch_idx=batch_idx
+            )
+            batch_results.append(sample_data)
+        return batch_results
+
+    def _process_single_sample(self, full_sandwich, detections, sample_idx, batch_idx):
+        """
+        מעבד דגימה בודדת: מחלץ סלייס אמצעי מלא למסווג וקופסאות XYHW לרגרסיה.
+        """
+        # --- CLASSIFIER INPUT: הסלייס האמצעי המלא (Channel 1) ---
+        full_middle_slice = full_sandwich[1:2, :, :].cpu()
         
-        return {
-            Metrics.DEFAULT_METRIC_LOSS.get_metric_variant(ModelStage.TRAIN): df[train_col].tolist() if train_col in df.columns else [],
-            Metrics.DEFAULT_METRIC_LOSS.get_metric_variant(ModelStage.VAL): df[val_col].tolist() if val_col in df.columns else [],
-        }
-
-    def _replay_callbacks(self, callbacks, history):
-        train_losses = history.get(Metrics.DEFAULT_METRIC_LOSS.get_metric_variant(ModelStage.TRAIN), [])
-        val_losses = history.get(Metrics.DEFAULT_METRIC_LOSS.get_metric_variant(ModelStage.VAL), [])
-        epoch_count = len(train_losses)
-
-        for epoch_idx in range(epoch_count):
-            train_metrics = {Metrics.DEFAULT_METRIC_LOSS.value : train_losses[epoch_idx]}
-            val_metrics = {Metrics.DEFAULT_METRIC_LOSS.value : val_losses[epoch_idx] if epoch_idx < len(val_losses) else 0}
+        detected_nodules = []
+        
+        for det in detections:
+            # המרה מ-XYXY (פינות) ל-XYHW (מרכז, גובה, רוחב)
+            xyhw_meta = self._convert_to_xyhw(det[:4])
             
-            for callback in filter(callable, callbacks):
-                callback(epoch_idx, train_metrics, val_metrics)
-
-    # ======================== BACKBONE CONTROL ========================
-
-    def freeze_backbone(self):
-        self._set_backbone_grad(requires_grad=False)
-        logger.info("YOLO backbone frozen")
-
-    def unfreeze_backbone(self):
-        self._set_backbone_grad(requires_grad=True)
-        logger.info("YOLO backbone unfrozen")
-
-    def _set_backbone_grad(self, requires_grad: bool):
-        for param in self.yolo_model.model.parameters():
-            param.requires_grad = requires_grad
-
-    # ======================== INFERENCE ========================
-
-    def predict(self, images, confidence_threshold=ModelConstants.DEFAULT_CONFIDENCE_THRESHOLD) -> dict:
-        self.eval()
-        
-        Results=ModelConstants.Results
-
-        has_additional_layers = len(self.features) > 0
-        
-        if has_additional_layers:
-            tensor_input = self._to_tensor(images)
-            backbone_output = self.yolo_model.model(tensor_input)
+            # חילוץ ה-Crop עבור הרגרסיה (3 ערוצים חתוכים)
+            regression_crop = self._extract_regression_crop(full_sandwich, det[:4])
             
-            for layer in self.features:
-                backbone_output = layer(backbone_output)
-            
-            results = self.yolo_model.predict(backbone_output, conf=confidence_threshold, verbose=False)
-        else:
-            results = self.yolo_model(images, conf=confidence_threshold, verbose=False)
-
-        first_result = results[0]
-        boxes = first_result.boxes.xyxy.cpu().numpy().tolist()
-        scores = first_result.boxes.conf.cpu().numpy().tolist()
+            detected_nodules.append({
+                "x": xyhw_meta["x"],
+                "y": xyhw_meta["y"],
+                "h": xyhw_meta["h"],
+                "w": xyhw_meta["w"],
+                "confidence": det[4].item(),
+                "regression_input": regression_crop 
+            })
 
         return {
-            Results.BOUNDING_BOXES_KEY: boxes,
-            Results.CONFIDENCE_SCORES_KEY: scores,
-            Results.NODULES_COUNT: len(boxes),
+            "metadata": {"batch_idx": batch_idx, "sample_idx": sample_idx},
+            "classifier_input": full_middle_slice,
+            "nodules": detected_nodules
         }
 
-    def _to_tensor(self, images):
-        if isinstance(images, torch.Tensor):
-            tensor = images
-            if tensor.dim() == 3:
-                tensor = tensor.unsqueeze(0)
-            return tensor.to(self.device)
+    def _convert_to_xyhw(self, bbox_xyxy):
+        """
+        Converts bounding box from (x1, y1, x2, y2) to (x_center, y_center, height, width).
+        """
+        x1, y1, x2, y2 = bbox_xyxy
+        
+        width = x2 - x1
+        height = y2 - y1
+        x_center = x1 + (width / 2)
+        y_center = y1 + (height / 2)
+        
+        return {
+            "x": x_center.item(),
+            "y": y_center.item(),
+            "h": height.item(),
+            "w": width.item()
+        }
+
+    def _extract_regression_crop(self, stacked_slices, bbox_xyxy):
+        """
+        גוזר את הגידול ב-3 ערוצים עבור מודל הרגרסיה.
+        """
+        x1, y1, x2, y2 = map(int, bbox_xyxy)
+        _, img_h, img_w = stacked_slices.shape
+        
+        # הגנה על גבולות התמונה
+        x1, x2 = max(0, x1), min(img_w, x2)
+        y1, y2 = max(0, y1), min(img_h, y2)
+        
+        return stacked_slices[:, y1:y2, x1:x2].cpu()
 
 
-        is_numpy = isinstance(images, np.ndarray)
-        tensor = to_tensor(images) if is_numpy else to_tensor(np.array(images))
-        return tensor.unsqueeze(0).to(self.device)
+    def configure_optimizers(self):
+        optimizer = optim.AdamW(self.parameters(), lr=self.learning_rate, weight_decay=1e-3)
+        scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5)
+        return {
+            "optimizer": optimizer,
+            "lr_scheduler": {
+                "scheduler": scheduler,
+                "monitor": "val/loss",
+            }
+        }

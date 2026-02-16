@@ -1,13 +1,13 @@
 """Data Preprocessing Package - Organized structure for CT scan data preparation.
 
 Package structure:
-    core/         - Core protocols and configurations
-    sources/      - Data source adapters (PyLIDC, DICOM)
-    preprocessing/ - Volume and slice preprocessing
-    pipelines/    - Pipeline orchestration
-    io/           - File I/O operations
-    utils/        - Utilities (splitting, diagnostics)
-    legacy/       - Deprecated code (for reference)
+    core/           - Data contracts (VolumeData, NoduleData, etc.), coordinate transforms, PyLIDC setup
+    sources/        - Data source adapters (PyLIDC, DICOM) and annotation processing
+    preprocessing/  - Volume processing, slice processing (2.5D), quality gate, bbox conversion
+    pipelines/      - Pipeline orchestration (serial, parallel, inference)
+    io/             - Atomic file I/O and dataset metadata writers
+    utils/          - Patient splitting and dataset diagnostics
+    legacy/         - Deprecated code (for reference)
 """
 
 from .config import DataPrepConfig
@@ -22,16 +22,19 @@ from .core import (
     NoduleCropResult,
     configure_pylidc,
     import_pylidc,
+    CoordinateTransformer,
 )
 
-# Source adapters
-from .sources import PyLIDCScanSource, DICOMScanSource
+# Source adapters + annotation processing
+from .sources import PyLIDCScanSource, DICOMScanSource, NoduleAnnotationProcessor
 
 # Preprocessing
 from .preprocessing import (
     VolumePreprocessingPipeline,
     SliceQualityGate,
     SliceQualityConfig,
+    BoundingBoxConverter,
+    SlicePreprocessor,
 )
 
 # Pipelines
@@ -74,13 +77,17 @@ __all__ = [
     'NoduleCropResult',
     'configure_pylidc',
     'import_pylidc',
+    'CoordinateTransformer',
     # Sources
     'PyLIDCScanSource',
     'DICOMScanSource',
+    'NoduleAnnotationProcessor',
     # Preprocessing
     'VolumePreprocessingPipeline',
     'SliceQualityGate',
     'SliceQualityConfig',
+    'BoundingBoxConverter',
+    'SlicePreprocessor',
     # Pipelines
     'CTScanProcessor',
     'prepare_dataset',

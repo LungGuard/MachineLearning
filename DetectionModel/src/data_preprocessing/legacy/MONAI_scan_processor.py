@@ -23,12 +23,10 @@ from monai.transforms import ScaleIntensityRange, Zoom
 
 from constants.detection.dataset_constants import DatasetConstants, PreProcessingConstants
 
-from ...utils import (
-    VolumePreprocessor,
-    CoordinateTransformer,
-    BoundingBoxConverter,
-    NoduleAnnotationProcessor
-)
+from ..preprocessing.slice_processor import SlicePreprocessor
+from ..core.coordinate_transformer import CoordinateTransformer
+from ..preprocessing.bbox_converter import BoundingBoxConverter
+from ..sources.annotation_processor import NoduleAnnotationProcessor
 
 from ..io.atomic_io import atomic_save_image_and_label
 
@@ -357,7 +355,7 @@ class CTScanProcessor:
             context = f"n{nodule_idx:02d}_z{slice_idx:04d}"
 
             # ── Step 1: Create 2.5D sandwich ──
-            image_25d, crop_info = VolumePreprocessor.create_25d_sandwich(
+            image_25d, crop_info = SlicePreprocessor.create_25d_sandwich(
                 volume,
                 slice_idx,
                 target_size=target_size,
