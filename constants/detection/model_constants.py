@@ -12,19 +12,16 @@ class DetectionModelConstants:
     BATCH_SIZE = 16 
     DATASET_YAML = DATASET_DIR/ "data.yaml"  
     
-    class Results:
-        BOUNDING_BOXES_KEY = "bounding_boxes"
-        CONFIDENCE_SCORES_KEY = "confidence_scores"
-        NODULES_COUNT="nodules_count"
+
 
 class RegressionModelConstants:
-    DEFAULT_INPUT_SHAPE=(3,64,64)
-    DEFAULT_LEARNING_RATE=1e-4
-    CONV_BLOCK_NAME_PREFIX='conv'
-    DENSE_BLOCK_NAME_PREFIX='dense'
-    BRIDGE_LAYER_NAME='bridge'
-    FLATTEN_LAYER_NAME='flatten'
-    OUTPUT_LAYER_NAME='output'
+    DEFAULT_INPUT_SHAPE = (3,64,64)
+    DEFAULT_LEARNING_RATE = 1e-4
+    CONV_BLOCK_NAME_PREFIX = 'conv'
+    DENSE_BLOCK_NAME_PREFIX = 'dense'
+    BRIDGE_LAYER_NAME = 'bridge'
+    FLATTEN_LAYER_NAME = 'flatten'
+    OUTPUT_LAYER_NAME = 'output'
 
 class YoloVariant(StrEnum):
     YOLO_NANO = "yolov8n.pt"
@@ -61,10 +58,3 @@ class NoduleFeatures:
             texture=float(values[6]),
             calcification=float(values[7])
         )
-
-
-
-
- 
-
-

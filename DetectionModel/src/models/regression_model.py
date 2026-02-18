@@ -3,17 +3,19 @@ import torch
 import torch.nn as nn
 import torchmetrics
 from torchmetrics import MetricCollection
+
 from constants.detection.model_constants import RegressionModelConstants,NoduleFeatures
 from constants.detection.dataset_constants import Features
 from constants.common.metrics_constants import Metrics
 from constants.common.model_stages import ModelStage
+
 from utils.pt_layers.Conv2D_block import Conv2DBlock
 from utils.pt_layers.DenseBlock import DenseBlock
 
 class NoduleFeaturesModel(L.LightningModule):
     def __init__(self,
-                 input_shape=RegressionModelConstants.DEFAULT_INPUT_SHAPE,
-                 learning_rate: float = RegressionModelConstants.DEFAULT_LEARNING_RATE,
+                 input_shape = RegressionModelConstants.DEFAULT_INPUT_SHAPE,
+                 learning_rate : float = RegressionModelConstants.DEFAULT_LEARNING_RATE,
                  metrics=None):
         super(NoduleFeaturesModel, self).__init__()
         

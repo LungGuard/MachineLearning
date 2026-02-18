@@ -16,9 +16,7 @@ from typing import Protocol, List, Tuple, Dict, Optional, runtime_checkable
 import numpy as np
 
 
-# ──────────────────────────────────────────────
-# Shared Data Containers
-# ──────────────────────────────────────────────
+
 
 @dataclass(frozen=True)
 class VolumeData:

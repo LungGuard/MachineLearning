@@ -6,13 +6,17 @@ Utilities for processing nodule annotations from radiologists.
 import numpy as np
 from typing import Tuple, Optional, List
 from constants.detection.dataset_constants import DatasetConstants
+from constants.detection.centorid_enum import CENTROID
+from constants.detection.features_enum import Features
 from ..core.coordinate_transformer import CoordinateTransformer
 from ..preprocessing.bbox_converter import BoundingBoxConverter
+import contextlib
 
 
 class NoduleAnnotationProcessor:
     """Utilities for processing nodule annotations from radiologists."""
     
+    import contextlib
     @staticmethod
     def _safe_extract_bbox(ann):
         """Safely extract bounding box from annotation."""
@@ -28,18 +32,15 @@ class NoduleAnnotationProcessor:
         try:
             centroid = ann.centroid
             # Validate centroid exists and has correct dimensions
-            if centroid is not None and len(centroid) == 3:
-                return centroid
-            return None
+            return centroid if centroid is not None and len(centroid) == 3 else None
         except Exception:
             return None
     
     @staticmethod
     def _safe_extract_contour_slice_indices(ann):
         """Safely extract contour slice indices from annotation."""
-        try:            
-            og_space_contour_slice_indices = ann.contour_slice_indices
-            return og_space_contour_slice_indices
+        try:        
+            return ann.contour_slice_indices
         except Exception:
             return None
     
@@ -77,31 +78,30 @@ class NoduleAnnotationProcessor:
         bboxs = filter(None, map(NoduleAnnotationProcessor._safe_extract_bbox, annotations))
         diameters = list(map(BoundingBoxConverter.compute_diameter, bboxs))
         
-        features = {
-            DatasetConstants.Features.FEATURE_DIAMETER_MM: get_feature_value(
-                diameters, DatasetConstants.Features.FEATURE_DIAMETER_MM),
-            DatasetConstants.Features.FEATURE_MALIGNANCY: get_feature_value(
-                malignancy_scores, DatasetConstants.Features.FEATURE_MALIGNANCY),
-            DatasetConstants.Features.FEATURE_SPICULATION: get_feature_value(
-                spiculation_scores, DatasetConstants.Features.FEATURE_SPICULATION),
-            DatasetConstants.Features.FEATURE_LOBULATION: get_feature_value(
-                lobulation_scores, DatasetConstants.Features.FEATURE_LOBULATION),
-            DatasetConstants.Features.FEATURE_SUBTLETY: get_feature_value(
-                subtlety_scores, DatasetConstants.Features.FEATURE_SUBTLETY),
-            DatasetConstants.Features.FEATURE_SPHERICITY: get_feature_value(
-                sphericity_scores, DatasetConstants.Features.FEATURE_SPHERICITY),
-            DatasetConstants.Features.FEATURE_MARGIN: get_feature_value(
-                margin_scores, DatasetConstants.Features.FEATURE_MARGIN),
-            DatasetConstants.Features.FEATURE_TEXTURE: get_feature_value(
-                texture_scores, DatasetConstants.Features.FEATURE_TEXTURE),
-            DatasetConstants.Features.FEATURE_CALCIFICATION: get_feature_value(
-                calcification_scores, DatasetConstants.Features.FEATURE_CALCIFICATION),
-            DatasetConstants.Features.FEATURE_INTERNAL_STRUCTURE: get_feature_value(
-                internal_structure_scores, DatasetConstants.Features.FEATURE_INTERNAL_STRUCTURE),
-            DatasetConstants.Features.FEATURE_ANNOTATION_COUNT: len(annotations)
+        return  {
+            Features.DIAMETER_MM.value: get_feature_value(
+                diameters, Features.DIAMETER_MM.value),
+            Features.MALIGNANCY.value: get_feature_value(
+                malignancy_scores,Features.MALIGNANCY.value),
+            Features.SPICULATION.value: get_feature_value(
+                spiculation_scores, Features.SPICULATION.value),
+            Features.LOBULATION.value: get_feature_value(
+                lobulation_scores, Features.LOBULATION.value),
+            Features.SUBTLETY.value: get_feature_value(
+                subtlety_scores,Features.SUBTLETY.value),
+            Features.SPHERICITY.value: get_feature_value(
+                sphericity_scores, Features.SPHERICITY.value),
+            Features.MARGIN.value: get_feature_value(
+                margin_scores, Features.MARGIN.value),
+            Features.TEXTURE.value: get_feature_value(
+                texture_scores,Features.TEXTURE.value),
+            Features.CALCIFICATION.value: get_feature_value(
+                calcification_scores, Features.CALCIFICATION.value),
+            Features.INTERNAL_STRUCTURE.value : get_feature_value(
+                internal_structure_scores,Features.INTERNAL_STRUCTURE.value),
+            Features.ANNOTATION_COUNT.value: len(annotations)
         }
         
-        return features
     
     @staticmethod
     def _get_valid_slice_indices_from_annotation(
@@ -137,16 +137,16 @@ class NoduleAnnotationProcessor:
             if original_spacing is not None
             else 1.0
         )
-        
+
         all_valid_indices = map(
             lambda ann: NoduleAnnotationProcessor._get_valid_slice_indices_from_annotation(
                 ann, z_scale, volume_depth
             ),
             annotations
         )
-        
-        unique_indices = set(idx for indices in all_valid_indices for idx in indices)
-        
+
+        unique_indices = {idx for indices in all_valid_indices for idx in indices}
+
         return sorted(unique_indices)
     
     @staticmethod
@@ -158,24 +158,21 @@ class NoduleAnnotationProcessor:
     ) -> Optional[Tuple[float, float, float]]:
         """Calculate nodule centroid from annotations, transformed to resampled space."""
         centroids = []
-        
+
         for ann in annotations:
-            try:
+            with contextlib.suppress(Exception):
                 centroid = ann.centroid  # Returns (z, y, x) in original space
                 if centroid is not None and len(centroid) == 3:
                     centroids.append(centroid)
-            except Exception:
-                pass  # Skip failed annotations
-        
-        if len(centroids) == 0:
+        if not centroids:
             return None
-        
+
         # Average centroid in original space
         avg_centroid = tuple(
             sum(c[i] for c in centroids) / len(centroids)
-            for i in range(DatasetConstants.CENTROID.CENTROID_DIM)
+            for i in range(len(CENTROID))
         )
-        
+
         # Transform to resampled space if spacing provided
         transformed_centroid = (
             CoordinateTransformer.transform_coordinates_to_resampled(
@@ -184,7 +181,7 @@ class NoduleAnnotationProcessor:
             if original_spacing is not None
             else avg_centroid
         )
-        
+
         # Validate against resampled volume bounds
         z, y, x = transformed_centroid
         is_within_bounds = (
@@ -192,5 +189,5 @@ class NoduleAnnotationProcessor:
             0 <= y < volume_shape[1] and
             0 <= x < volume_shape[2]
         )
-        
+
         return transformed_centroid if is_within_bounds else None

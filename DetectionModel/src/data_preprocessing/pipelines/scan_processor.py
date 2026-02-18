@@ -24,6 +24,10 @@ from typing import List, Dict, Tuple, Optional
 import numpy as np
 
 from constants.detection.dataset_constants import DatasetConstants
+from constants.detection.bbox_enum import BBOX
+from constants.detection.volume_enum import VOLUME
+from constants.detection.centorid_enum import CENTROID
+from constants.detection.features_enum import Features
 
 from ..preprocessing.bbox_converter import BoundingBoxConverter
 
@@ -57,7 +61,6 @@ class CTScanProcessor:
         self.directories = directories or {}
         self.logger = logging.getLogger(__name__)
 
-        # ── Composed modules ──
         self._quality_gate = SliceQualityGate(quality_config)
         self._volume_pipeline = VolumePreprocessingPipeline(config)
         self.inference = InferencePipeline(config, self._quality_gate)
@@ -299,12 +302,15 @@ class CTScanProcessor:
     @staticmethod
     def _build_metadata(filename, patient_id, split, nodule: NoduleData,
                          slice_idx, bbox, save_result, volume_shape) -> Dict:
+
         features = nodule.features
-        centroid = nodule.centroid_zyx
-        F = DatasetConstants.Features
-        C = DatasetConstants.CENTROID
-        B = DatasetConstants.BBOX
-        V = DatasetConstants.VOLUME
+        nodule_centroid = nodule.centroid_zyx
+
+
+        features = {feature.value : features[feature.value] for feature in Features}
+        centorid_dict={cent.value:centroid_dim for cent,centroid_dim in zip(CENTROID,nodule_centroid)}
+        bbox_dict = {bbox_dim.value : dim_value for bbox_dim,dim_value in zip(BBOX,bbox)}
+        volume_dict = {vol_dim.value : vol_shape for vol_dim,vol_shape in zip(VOLUME,volume_shape)}
 
         return {
             DatasetConstants.FILE_NAME: filename,
@@ -312,27 +318,10 @@ class CTScanProcessor:
             DatasetConstants.SPLIT_GROUP: split,
             DatasetConstants.NOUDLE_INDEX: nodule.index,
             DatasetConstants.SLICE_INDEX: slice_idx,
-            F.FEATURE_DIAMETER_MM: features[F.FEATURE_DIAMETER_MM],
-            F.FEATURE_MALIGNANCY: features[F.FEATURE_MALIGNANCY],
-            F.FEATURE_SPICULATION: features[F.FEATURE_SPICULATION],
-            F.FEATURE_LOBULATION: features[F.FEATURE_LOBULATION],
-            F.FEATURE_SUBTLETY: features[F.FEATURE_SUBTLETY],
-            F.FEATURE_SPHERICITY: features[F.FEATURE_SPHERICITY],
-            F.FEATURE_MARGIN: features[F.FEATURE_MARGIN],
-            F.FEATURE_TEXTURE: features[F.FEATURE_TEXTURE],
-            F.FEATURE_CALCIFICATION: features[F.FEATURE_CALCIFICATION],
-            F.FEATURE_INTERNAL_STRUCTURE: features[F.FEATURE_INTERNAL_STRUCTURE],
-            F.FEATURE_ANNOTATION_COUNT: features[F.FEATURE_ANNOTATION_COUNT],
-            C.CENTROID_Z: centroid[0],
-            C.CENTROID_Y: centroid[1],
-            C.CENTROID_X: centroid[2],
-            B.BBOX_X: bbox[0],
-            B.BBOX_Y: bbox[1],
-            B.BBOX_W: bbox[2],
-            B.BBOX_H: bbox[3],
+            **features,
+            **centorid_dict,
+            **bbox_dict,
             DatasetConstants.IMAGE_PATH: save_result.image_path,
             DatasetConstants.LABEL_PATH: save_result.label_path,
-            V.VOLUME_DEPTH: volume_shape[0],
-            V.VOLUME_HEIGHT: volume_shape[1],
-            V.VOLUME_WIDTH: volume_shape[2],
+            **volume_dict
         }

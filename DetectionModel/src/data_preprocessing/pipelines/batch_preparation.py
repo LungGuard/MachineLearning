@@ -8,7 +8,6 @@ this module owns the data-processing logic.
 
 
 import contextlib
-# ── Compatibility patches MUST come before any pylidc-touching import ──
 from pylidc_compat import apply_patches as _apply_compat
 _apply_compat()
 
@@ -57,6 +56,8 @@ from terminal_ui import (
     setup_rich_logging,
 )
 from pipeline_wizard import LiveDashboard, run_interactive_cleanup
+from constants.common.model_stages import ModelStage
+
 
 logger = logging.getLogger(__name__)
 
@@ -71,19 +72,20 @@ TOTAL_SETUP_PHASES = 4
 def create_directory_structure(output_dir: str) -> Dict[str, Path]:
     """Creates the YOLO directory structure."""
     base_path = Path(output_dir)
-    directories = {
-        "train_images": base_path / "train" / "images",
-        "train_labels": base_path / "train" / "labels",
-        "val_images": base_path / "val" / "images",
-        "val_labels": base_path / "val" / "labels",
-        "test_images": base_path / "test" / "images",
-        "test_labels": base_path / "test" / "labels",
-        "metadata": base_path / "metadata",
-    }
+    
+    directories = {}
+    DIR_TYPES= ("images","labels")
+    
+    for stage in ModelStage:
+        for dir_type in DIR_TYPES:
+            directories[f'{stage.prefix}{dir_type}'] = base_path / stage.value / dir_type
+    
+    directories["metadata"] = base_path / "metadata"
+    
 
     for name, path in directories.items():
         is_metadata = name == "metadata"
-        if should_wipe := path.exists() and not is_metadata:
+        if path.exists() and not is_metadata:
             shutil.rmtree(path)
         path.mkdir(parents=True, exist_ok=True)
         if is_metadata:
@@ -92,11 +94,6 @@ def create_directory_structure(output_dir: str) -> Dict[str, Path]:
                     f.unlink()
 
     return directories
-
-
-# ──────────────────────────────────────────────────────────
-# Scan Filtering
-# ──────────────────────────────────────────────────────────
 
 
 def filter_scans_with_nodules(all_scans: List, pylidc_module) -> List[Tuple]:
@@ -192,9 +189,9 @@ class DataPreparationPipeline:
                         .filter(self.pylidc.Scan.patient_id == pid)
                         .all()
                     )
-                    for s in scans:
-                        if len(s.cluster_annotations()) > 0:
-                            self.scans_to_process.append((s, s.cluster_annotations()))
+                    scans = list(filter(lambda scan:scan.cluster_annotations()>0,scans))
+                    self.scans_to_process = [(scan,scan.cluster_annotations()) for scan in scans] 
+
                 progress.advance(task)
 
     def _create_new_splits(self, splits_json: Path) -> None:
