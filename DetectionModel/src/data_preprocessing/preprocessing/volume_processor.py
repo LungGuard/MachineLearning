@@ -105,6 +105,7 @@ class VolumePreprocessingPipeline:
     def _clean_with_offset_detection(self, volume: np.ndarray,
                                       patient_id: str) -> np.ndarray:
         """Handle NaNs, detect padding/offset, clip to valid HU range."""
+        
         nan_count = np.isnan(volume).sum()
         volume = np.nan_to_num(volume, nan=float(HU.AIR_HU)) if nan_count > 0 else volume
         self.logger.warning(

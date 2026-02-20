@@ -9,8 +9,12 @@ from pathlib import Path
 from PIL import Image
 from torchvision import transforms
 import logging
+
 from constants.detection.features_enum import Features
 from constants.detection.bbox_enum import BBOX
+from constants.common.model_stages import ModelStage
+from constants.detection.dataset_constants import DatasetConstants
+
 logger = logging.getLogger(__name__)
 
 
@@ -21,12 +25,7 @@ TARGET_FEATURES = [
 
 BBOX_COLUMNS = [ bbox.value for bbox in BBOX ]
 SPLIT_COLUMN = "split_group"
-IMAGE_PATH_COLUMN = "image_path"
 
-DEFAULT_CROP_SIZE = 64
-
-
-# ─── Crop Transform ──────────────────────────────────────────────────────────
 
 class AspectRatioPreservingResize:
     """
@@ -41,7 +40,7 @@ class AspectRatioPreservingResize:
         2. Zero-pad shorter edge to make it square
     """
 
-    def __init__(self, target_size: int = DEFAULT_CROP_SIZE):
+    def __init__(self, target_size: int = DatasetConstants.DEFAULT_CROP_SIZE):
         self.target_size = target_size
 
     def __call__(self, image: Image.Image) -> Image.Image:
@@ -60,7 +59,6 @@ class AspectRatioPreservingResize:
         return padded
 
 
-# ─── Dataset ─────────────────────────────────────────────────────────────────
 
 class NoduleRegressionDataset(Dataset):
     """
@@ -80,7 +78,7 @@ class NoduleRegressionDataset(Dataset):
         dataframe: pd.DataFrame,
         dataset_root: Path,
         target_features: list[str],
-        crop_size: int = DEFAULT_CROP_SIZE,
+        crop_size: int = DatasetConstants.DEFAULT_CROP_SIZE,
         augment: bool = False,
     ):
         self.dataframe = dataframe.reset_index(drop=True)
@@ -92,8 +90,7 @@ class NoduleRegressionDataset(Dataset):
 
         self.augment_transform = transforms.Compose([
             transforms.RandomHorizontalFlip(p=0.5),
-            transforms.RandomVerticalFlip(p=0.5),
-            transforms.RandomRotation(degrees=15),
+            transforms.RandomRotation(degrees=10),
             transforms.ColorJitter(brightness=0.1, contrast=0.1),
         ]) if augment else None
 
@@ -121,21 +118,20 @@ class NoduleRegressionDataset(Dataset):
 
     def _load_and_crop(self, row: pd.Series) -> torch.Tensor:
         """Load full CT slice, crop nodule region using bbox, apply transforms."""
-        image_path = self.dataset_root / row[IMAGE_PATH_COLUMN]
+        image_path = self.dataset_root / row[DatasetConstants.IMAGE_PATH]
         full_image = Image.open(image_path).convert("RGB")
 
         cropped = self._crop_nodule(full_image, row)
         resized = self.crop_transform(cropped)
 
-        augmented = (
-            self.augment_transform(resized)
-            if self.augment_transform is not None
-            else resized
-        )
+        if self.augment_transform is not None:
+            resized = self.augment_transform(resized)
 
-        return self.to_tensor(augmented)
+        return self.to_tensor(resized)
 
-    def _crop_nodule(self, image: Image.Image, row: pd.Series) -> Image.Image:
+    def _crop_nodule(self, image: Image.Image, row: pd.Series,
+                     margin_factor = DatasetConstants.MARGIN_FACTOR,
+                     min_crop_size=DatasetConstants.MIN_CROP_SIZE) -> Image.Image:
         """
         Extract nodule region using normalized YOLO bounding box coordinates.
 
@@ -144,28 +140,25 @@ class NoduleRegressionDataset(Dataset):
         """
         img_width, img_height = image.size
 
-        x_center = row["bbox_x"] * img_width
-        y_center = row["bbox_y"] * img_height
-        bbox_w = row["bbox_w"] * img_width
-        bbox_h = row["bbox_h"] * img_height
+        x_center = row[BBOX.X.value] * img_width
+        y_center = row[BBOX.Y.value] * img_height
+        bbox_w = row[BBOX.W.value] * img_width
+        bbox_h = row[BBOX.H.value] * img_height
 
-        # 10% margin around nodule for surrounding tissue context
-        margin_x = bbox_w * 0.1
-        margin_y = bbox_h * 0.1
+        # adding margin around nodule for surrounding tissue context
+        margin_x = bbox_w * margin_factor
+        margin_y = bbox_h * margin_factor
 
         x_min = max(0, int(x_center - bbox_w / 2 - margin_x))
         y_min = max(0, int(y_center - bbox_h / 2 - margin_y))
         x_max = min(img_width, int(x_center + bbox_w / 2 + margin_x))
         y_max = min(img_height, int(y_center + bbox_h / 2 + margin_y))
 
-        # Ensure minimum crop of 4x4 pixels for very small nodules
-        x_max = max(x_max, x_min + 4)
-        y_max = max(y_max, y_min + 4)
+        # Ensure minimum crop of given size (default is 4x4) for very small nodules
+        x_max = max(x_max, x_min + min_crop_size)
+        y_max = max(y_max, y_min + min_crop_size)
 
         return image.crop((x_min, y_min, x_max, y_max))
-
-
-# ─── DataModule ──────────────────────────────────────────────────────────────
 
 class RegressionDataModule(L.LightningDataModule):
     """
@@ -197,7 +190,7 @@ class RegressionDataModule(L.LightningDataModule):
         metadata_csv: Path,
         dataset_root: Path,
         target_features: list[str] = None,
-        crop_size: int = DEFAULT_CROP_SIZE,
+        crop_size: int = DatasetConstants.DEFAULT_CROP_SIZE,
         batch_size: int = 32,
         num_workers: int = 4,
         pin_memory: bool = True,
@@ -232,17 +225,15 @@ class RegressionDataModule(L.LightningDataModule):
         df = pd.read_csv(self.metadata_csv)
         self._validate_dataframe(df)
 
-        split_map = {
-            "train": df[df[SPLIT_COLUMN] == "train"],
-            "val": df[df[SPLIT_COLUMN] == "val"],
-            "test": df[df[SPLIT_COLUMN] == "test"],
-        }
+        split_map = {stage.value : df[df[SPLIT_COLUMN]] == stage.value 
+                     for stage in ModelStage}
+
 
         self._log_split_stats(split_map)
 
         splits_needed = self._resolve_splits(stage)
         for split_name in splits_needed:
-            augment = split_name == "train"
+            augment = split_name == ModelStage.TRAIN.value
             dataset = NoduleRegressionDataset(
                 dataframe=split_map[split_name],
                 dataset_root=self.dataset_root,
@@ -264,8 +255,6 @@ class RegressionDataModule(L.LightningDataModule):
     def predict_dataloader(self) -> DataLoader:
         return self.test_dataloader()
 
-    # ─── Private Helpers ─────────────────────────────────────────────────────
-
     def _build_dataloader(self, dataset: NoduleRegressionDataset, shuffle: bool) -> DataLoader:
         return DataLoader(
             dataset=dataset,
@@ -278,19 +267,20 @@ class RegressionDataModule(L.LightningDataModule):
 
     def _validate_dataframe(self, df: pd.DataFrame) -> None:
         """Verify all required columns exist."""
-        required = set(self.target_features + BBOX_COLUMNS + [SPLIT_COLUMN, IMAGE_PATH_COLUMN])
+        required = set(self.target_features + BBOX_COLUMNS + [SPLIT_COLUMN, DatasetConstants.IMAGE_PATH])
         missing = required - set(df.columns)
         assert not missing, f"Missing columns in CSV: {missing}"
 
     def _resolve_splits(self, stage) -> list[str]:
+        model_stages=[stage.value for stage in ModelStage]
         stage_to_splits = {
             "fit": ["train", "val"],
             "validate": ["val"],
             "test": ["test"],
             "predict": ["test"],
-            None: ["train", "val", "test"],
+            None: model_stages,
         }
-        return stage_to_splits.get(stage, ["train", "val", "test"])
+        return stage_to_splits.get(stage, model_stages)
 
     def _log_split_stats(self, split_map: dict[str, pd.DataFrame]) -> None:
         for name, split_df in split_map.items():

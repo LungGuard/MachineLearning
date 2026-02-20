@@ -5,9 +5,8 @@ Utilities for processing nodule annotations from radiologists.
 
 import numpy as np
 from typing import Tuple, Optional, List
-from constants.detection.dataset_constants import DatasetConstants
 from constants.detection.centorid_enum import CENTROID
-from constants.detection.features_enum import Features
+from constants.detection.features_enum import Features,DEFAULT_FEATURES
 from ..core.coordinate_transformer import CoordinateTransformer
 from ..preprocessing.bbox_converter import BoundingBoxConverter
 import contextlib
@@ -55,8 +54,8 @@ class NoduleAnnotationProcessor:
         LIDC-IDRI nodules have 1-4 independent radiologist annotations.
         This function computes consensus features using averaging.
         """
-        default_features = DatasetConstants.Features.DEFAULT_FEATURES
-        default_features[DatasetConstants.Features.FEATURE_DIAMETER_MM] = fallback_diameter
+        default_features = DEFAULT_FEATURES
+        default_features[Features.DIAMETER_MM.value] = fallback_diameter
 
         def get_feature_value(feature_scores, feature_key):
             """Return the feature value if scores exist, otherwise return default."""

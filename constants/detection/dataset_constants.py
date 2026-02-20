@@ -8,8 +8,6 @@ class DatasetConstants:
     SLICE_INDEX = 'slice_index'
     IMAGE_PATH = 'image_path'
     LABEL_PATH = 'label_path'
-
-
     TRAIN_IMAGES='train_images'
     TRAIN_LABELS='train_labels'
     VAL_IMAGES='val_images'
@@ -17,6 +15,9 @@ class DatasetConstants:
     TEST_IMAGES = 'test_images'
     TEST_LABELS = 'test_labels'
     METADATA = 'metadata'
+    MARGIN_FACTOR = 0.1
+    MIN_CROP_SIZE = 4
+    DEFAULT_CROP_SIZE = 64
 
     class Features:
         FEATURE_DIAMETER_MM = 'diameter_mm'
@@ -41,20 +42,7 @@ class DatasetConstants:
             FEATURE_CALCIFICATION : 1.0,
             FEATURE_INTERNAL_STRUCTURE : 1.0,
         }
-    class CENTROID:
-        CENTROID_X = 'centroid_x'
-        CENTROID_Y = 'centroid_Y'
-        CENTROID_Z = 'centroid_Z'
-        CENTROID_DIM = 3
-    class BBOX:
-        BBOX_X = 'bbox_x'
-        BBOX_Y = 'bbox_y'
-        BBOX_W = 'bbox_w'
-        BBOX_H = 'bbox_h'
-    class VOLUME :
-        VOLUME_DEPTH = 'volume_depth'
-        VOLUME_HEIGHT = 'volume_height'
-        VOLUME_WIDTH = 'volume_width'
+
 
     
 class PreProcessingConstants:

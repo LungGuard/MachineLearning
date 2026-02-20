@@ -52,14 +52,21 @@ class NoduleFeaturesModel(L.LightningModule):
         })
 
     def _build_model(self):
-        self.feature_extractor.add_module(f'{RegressionModelConstants.CONV_BLOCK_NAME_PREFIX}1', Conv2DBlock(self.channels, 32))
-        self.feature_extractor.add_module(f'{RegressionModelConstants.CONV_BLOCK_NAME_PREFIX}2', Conv2DBlock(32, 64))
-        self.feature_extractor.add_module(f'{RegressionModelConstants.CONV_BLOCK_NAME_PREFIX}3', Conv2DBlock(64, 128))
-        self.feature_extractor.add_module(RegressionModelConstants.BRIDGE_LAYER_NAME, nn.AdaptiveAvgPool2d((1, 1)))
-        self.feature_extractor.add_module(RegressionModelConstants.FLATTEN_LAYER_NAME, nn.Flatten())
+        self.feature_extractor.add_module(f'{RegressionModelConstants.CONV_BLOCK_NAME_PREFIX}1',
+                                          Conv2DBlock(self.channels, 32))
+        self.feature_extractor.add_module(f'{RegressionModelConstants.CONV_BLOCK_NAME_PREFIX}2',
+                                          Conv2DBlock(32, 64))
+        self.feature_extractor.add_module(f'{RegressionModelConstants.CONV_BLOCK_NAME_PREFIX}3',
+                                          Conv2DBlock(64, 128))
+        self.feature_extractor.add_module(RegressionModelConstants.BRIDGE_LAYER_NAME,
+                                          nn.AdaptiveAvgPool2d((1, 1)))
+        self.feature_extractor.add_module(RegressionModelConstants.FLATTEN_LAYER_NAME,
+                                          nn.Flatten())
 
-        self.regressor.add_module(f'{RegressionModelConstants.DENSE_BLOCK_NAME_PREFIX}1', DenseBlock(128, 64)) 
-        self.regressor.add_module(RegressionModelConstants.OUTPUT_LAYER_NAME, nn.Linear(64, len(Features)))
+        self.regressor.add_module(f'{RegressionModelConstants.DENSE_BLOCK_NAME_PREFIX}1',
+                                  DenseBlock(128, 64)) 
+        self.regressor.add_module(RegressionModelConstants.OUTPUT_LAYER_NAME,
+                                  nn.Linear(64, len(Features)))
 
     def forward(self, x):
         features = self.feature_extractor(x)
@@ -115,7 +122,7 @@ class NoduleFeaturesModel(L.LightningModule):
                 },
             }
         
-def predict_clinical_profile(self, x):
+def predict_features(self, x):
         self.eval() 
 
         with torch.no_grad():
