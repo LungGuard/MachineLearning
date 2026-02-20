@@ -13,7 +13,9 @@ import logging
 from constants.detection.features_enum import Features
 from constants.detection.bbox_enum import BBOX
 from constants.common.model_stages import ModelStage
+from constants.detection.transforms_values import TransformValues
 from constants.detection.dataset_constants import DatasetConstants
+
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +26,7 @@ TARGET_FEATURES = [
 ]
 
 BBOX_COLUMNS = [ bbox.value for bbox in BBOX ]
-SPLIT_COLUMN = "split_group"
+
 
 
 class AspectRatioPreservingResize:
@@ -87,11 +89,14 @@ class NoduleRegressionDataset(Dataset):
         self.crop_size = crop_size
 
         self.crop_transform = AspectRatioPreservingResize(crop_size)
+        
+        self.transform_values=TransformValues()
 
         self.augment_transform = transforms.Compose([
-            transforms.RandomHorizontalFlip(p=0.5),
-            transforms.RandomRotation(degrees=10),
-            transforms.ColorJitter(brightness=0.1, contrast=0.1),
+            transforms.RandomHorizontalFlip(p=self.transform_values.horizontal_flip_probability),
+            transforms.RandomRotation(degrees=self.transform_values.rotate_angle_range),
+            transforms.ColorJitter(brightness=self.transform_values.brightness_factor,
+                                   contrast=self.transform_values.contrast_factor),
         ]) if augment else None
 
         self.to_tensor = transforms.ToTensor()
@@ -225,7 +230,7 @@ class RegressionDataModule(L.LightningDataModule):
         df = pd.read_csv(self.metadata_csv)
         self._validate_dataframe(df)
 
-        split_map = {stage.value : df[df[SPLIT_COLUMN]] == stage.value 
+        split_map = {stage.value : df[df[DatasetConstants.SPLIT_GROUP]] == stage.value 
                      for stage in ModelStage}
 
 
@@ -267,7 +272,7 @@ class RegressionDataModule(L.LightningDataModule):
 
     def _validate_dataframe(self, df: pd.DataFrame) -> None:
         """Verify all required columns exist."""
-        required = set(self.target_features + BBOX_COLUMNS + [SPLIT_COLUMN, DatasetConstants.IMAGE_PATH])
+        required = set(self.target_features + BBOX_COLUMNS + [DatasetConstants.SPLIT_GROUP, DatasetConstants.IMAGE_PATH])
         missing = required - set(df.columns)
         assert not missing, f"Missing columns in CSV: {missing}"
 

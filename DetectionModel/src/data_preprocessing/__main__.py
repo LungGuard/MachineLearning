@@ -46,17 +46,14 @@ def main() -> Path:
 def _dispatch(mode: PipelineMode, config: DataPrepConfig, num_workers=None) -> Path:
     """Route to the correct pipeline based on the wizard's mode selection."""
 
-    result: Path
 
     if mode == PipelineMode.SERIAL:
         from .pipelines.batch_preparation import DataPreparationPipeline
         pipeline = DataPreparationPipeline(config)
-        result = pipeline.run_serial()
+        return pipeline.run_serial()
     else:
         from .pipelines.parallel_preparation import run_parallel_pipeline
-        result = run_parallel_pipeline(config, num_workers=num_workers)
-
-    return result
+        return run_parallel_pipeline(config, num_workers=num_workers)
 
 
 if __name__ == "__main__":
