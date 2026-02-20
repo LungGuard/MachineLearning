@@ -11,7 +11,7 @@ import cv2
 from scipy.ndimage import zoom
 from typing import Tuple, Optional
 import logging
-from constants.detection.dataset_constants import PreProcessingConstants
+from constants.detection.preprocessing_constants import HUValues,PreProcessingConstants
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +44,7 @@ class SlicePreprocessor:
         nan_count = np.isnan(volume).sum()
         if nan_count > 0:
             logger.warning(f"Found {nan_count} NaN values, replacing with -1000")
-            volume = np.nan_to_num(volume, nan=PreProcessingConstants.HU_VALUES.AIR_HU)
+            volume = np.nan_to_num(volume, nan=HUValues.AIR_HU)
 
         # 3. Create padding mask (values < -1500 are typically padding: -2048, -3024, etc.)
         PADDING_THRESHOLD = -1500.0
@@ -88,8 +88,8 @@ class SlicePreprocessor:
         # 5. Set padding to exactly -1000 HU (air) BEFORE resampling
         # This prevents extreme values from corrupting interpolation
         if padding_voxel_count > 0:
-            volume[padding_mask] = PreProcessingConstants.HU_VALUES.AIR_HU  # -1000
-            logger.debug(f"Set {padding_voxel_count} padding voxels to {PreProcessingConstants.HU_VALUES.AIR_HU} HU")
+            volume[padding_mask] = HUValues.AIR_HU  # -1000
+            logger.debug(f"Set {padding_voxel_count} padding voxels to {HUValues.AIR_HU} HU")
 
         # 6. Clip to valid HU range (safety measure)
         volume = np.clip(volume, -1000.0, 3000.0)

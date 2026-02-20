@@ -15,12 +15,10 @@ import numpy as np
 import torch
 from monai.transforms import ScaleIntensityRange, Zoom
 
-from constants.detection.dataset_constants import PreProcessingConstants
+from constants.detection.preprocessing_constants import PreProcessingConstants,HUValues,IntensityRange
 
 logger = logging.getLogger(__name__)
 
-HU = PreProcessingConstants.HU_VALUES
-INTENSITY = PreProcessingConstants.INTENSITY_RANGE
 
 
 class VolumePreprocessingPipeline:
@@ -62,7 +60,7 @@ class VolumePreprocessingPipeline:
 
         volume_tensor = torch.from_numpy(cleaned).float().unsqueeze(0)
         volume_tensor = torch.clamp(
-            volume_tensor, min=float(HU.AIR_HU), max=float(HU.MAX_HU)
+            volume_tensor, min=float(HUValues.AIR_HU), max=float(HUValues.MAX_HU)
         )
 
         resampled = self._resample(volume_tensor, original_spacing)
@@ -96,7 +94,7 @@ class VolumePreprocessingPipeline:
 
         scaler = ScaleIntensityRange(
             a_min=window_min, a_max=window_max,
-            b_min=INTENSITY.OUTPUT_MIN, b_max=INTENSITY.OUTPUT_MAX,
+            b_min=IntensityRange.OUTPUT_MIN, b_max=IntensityRange.OUTPUT_MAX,
             clip=True,
         )
         return scaler(volume_tensor)
@@ -107,31 +105,31 @@ class VolumePreprocessingPipeline:
         """Handle NaNs, detect padding/offset, clip to valid HU range."""
         
         nan_count = np.isnan(volume).sum()
-        volume = np.nan_to_num(volume, nan=float(HU.AIR_HU)) if nan_count > 0 else volume
+        volume = np.nan_to_num(volume, nan=float(HUValues.AIR_HU)) if nan_count > 0 else volume
         self.logger.warning(
             f"[{patient_id}] Found {nan_count} NaN values, replacing with air HU"
         ) if nan_count > 0 else None
 
-        padding_mask = volume < HU.PADDING_THRESHOLD
+        padding_mask = volume < HUValues.PADDING_THRESHOLD
         padding_count = padding_mask.sum()
 
         center_slice = volume[volume.shape[0] // 2]
-        valid_mask = (center_slice > HU.PADDING_THRESHOLD) & (center_slice < HU.VALID_PIXEL_MAX)
+        valid_mask = (center_slice > HUValues.PADDING_THRESHOLD) & (center_slice < HUValues.VALID_PIXEL_MAX)
         valid_pixels = center_slice[valid_mask]
 
         needs_offset = (
             len(valid_pixels) > 0
-            and np.percentile(valid_pixels, HU.OFFSET_PERCENTILE) > HU.OFFSET_THRESHOLD
+            and np.percentile(valid_pixels, HUValues.OFFSET_PERCENTILE) > HUValues.OFFSET_THRESHOLD
         )
 
         if needs_offset:
-            low_p = np.percentile(valid_pixels, HU.OFFSET_PERCENTILE)
+            low_p = np.percentile(valid_pixels, HUValues.OFFSET_PERCENTILE)
             self.logger.info(
                 f"[{patient_id}] Offset scan detected (P5={low_p:.1f}). "
-                f"Applying -{HU.OFFSET_CORRECTION} correction."
+                f"Applying -{HUValues.OFFSET_CORRECTION} correction."
             )
-            volume[~padding_mask] -= float(HU.OFFSET_CORRECTION)
+            volume[~padding_mask] -= float(HUValues.OFFSET_CORRECTION)
 
-        volume[padding_mask] = float(HU.AIR_HU) if padding_count > 0 else volume[padding_mask]
-        volume = np.clip(volume, float(HU.AIR_HU), float(HU.MAX_HU))
+        volume[padding_mask] = float(HUValues.AIR_HU) if padding_count > 0 else volume[padding_mask]
+        volume = np.clip(volume, float(HUValues.AIR_HU), float(HUValues.MAX_HU))
         return volume
