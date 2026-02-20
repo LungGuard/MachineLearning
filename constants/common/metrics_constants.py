@@ -2,13 +2,13 @@
 from enum import StrEnum,Enum
 
 class Metrics(StrEnum):
-    METRIC_ACCURACY = 'accuracy'
-    METRIC_PRECISION = 'precision'
-    METRIC_RECALL = 'recall'
-    METRIC_AUC = 'auc'
-    DEFAULT_METRIC_LOSS='loss'
-    METRIC_R2='r2'
-    METRIC_RMSE=''
+    ACCURACY = 'accuracy'
+    PRECISION = 'precision'
+    RECALL = 'recall'
+    AUC = 'auc'
+    DEFAULT_LOSS='loss'
+    R2='r2'
+    RMSE='rmse'
 
     def get_variant(self,variant):
         

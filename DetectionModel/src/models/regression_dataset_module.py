@@ -145,10 +145,10 @@ class NoduleRegressionDataset(Dataset):
         """
         img_width, img_height = image.size
 
-        x_center = row[BBOX.X.value] * img_width
-        y_center = row[BBOX.Y.value] * img_height
-        bbox_w = row[BBOX.W.value] * img_width
-        bbox_h = row[BBOX.H.value] * img_height
+        x_center = row[BBOX.X] * img_width
+        y_center = row[BBOX.Y] * img_height
+        bbox_w = row[BBOX.W] * img_width
+        bbox_h = row[BBOX.H] * img_height
 
         # adding margin around nodule for surrounding tissue context
         margin_x = bbox_w * margin_factor
@@ -230,7 +230,7 @@ class RegressionDataModule(L.LightningDataModule):
         df = pd.read_csv(self.metadata_csv)
         self._validate_dataframe(df)
 
-        split_map = {stage.value : df[df[DatasetConstants.SPLIT_GROUP]] == stage.value 
+        split_map = {stage : df[df[DatasetConstants.SPLIT_GROUP]] == stage 
                      for stage in ModelStage}
 
 
@@ -238,7 +238,7 @@ class RegressionDataModule(L.LightningDataModule):
 
         splits_needed = self._resolve_splits(stage)
         for split_name in splits_needed:
-            augment = split_name == ModelStage.TRAIN.value
+            augment = split_name == ModelStage.TRAIN
             dataset = NoduleRegressionDataset(
                 dataframe=split_map[split_name],
                 dataset_root=self.dataset_root,
@@ -272,17 +272,18 @@ class RegressionDataModule(L.LightningDataModule):
 
     def _validate_dataframe(self, df: pd.DataFrame) -> None:
         """Verify all required columns exist."""
-        required = set(self.target_features + BBOX_COLUMNS + [DatasetConstants.SPLIT_GROUP, DatasetConstants.IMAGE_PATH])
+        required = set(self.target_features + BBOX_COLUMNS + [DatasetConstants.SPLIT_GROUP,
+                                                              DatasetConstants.IMAGE_PATH])
         missing = required - set(df.columns)
         assert not missing, f"Missing columns in CSV: {missing}"
 
     def _resolve_splits(self, stage) -> list[str]:
-        model_stages=[stage.value for stage in ModelStage]
+        model_stages = list(ModelStage)
         stage_to_splits = {
-            "fit": ["train", "val"],
-            "validate": ["val"],
-            "test": ["test"],
-            "predict": ["test"],
+            "fit": [ModelStage.TRAIN,ModelStage.VAL],
+            "validate": [ModelStage.VAL],
+            "test": [ModelStage.TEST],
+            "predict": [ModelStage.TEST],
             None: model_stages,
         }
         return stage_to_splits.get(stage, model_stages)
@@ -292,6 +293,6 @@ class RegressionDataModule(L.LightningDataModule):
             target_means = split_df[self.target_features].mean()
             logger.info(
                 f"{name}: {len(split_df)} samples | "
-                f"malignancy mean={target_means['malignancy']:.2f}, "
-                f"spiculation mean={target_means['spiculation']:.2f}"
+                f"malignancy mean={target_means[Features.MALIGNANCY]:.2f}, "
+                f"spiculation mean={target_means[Features.SPICULATION]:.2f}"
             )

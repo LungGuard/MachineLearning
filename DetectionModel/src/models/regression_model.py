@@ -5,7 +5,7 @@ import torchmetrics
 from torchmetrics import MetricCollection
 
 from constants.detection.model_constants import RegressionModelConstants,NoduleFeatures
-from constants.detection.dataset_constants import Features
+from constants.detection.features_enum import Features
 from constants.common.metrics_constants import Metrics
 from constants.common.model_stages import ModelStage
 
@@ -38,17 +38,17 @@ class NoduleFeaturesModel(L.LightningModule):
             return MetricCollection(metrics) if isinstance(metrics, dict) else metrics
         else:
             return MetricCollection({
-                Metrics.METRIC_RMSE.value: torchmetrics.MeanSquaredError(squared=False),
-                Metrics.METRIC_R2.value: torchmetrics.R2Score()
+                Metrics.RMSE: torchmetrics.MeanSquaredError(squared=False),
+                Metrics.R2: torchmetrics.R2Score()
             })
     
     def _setup_metrics(self, metrics):
         base_metrics = self._init_metrics(metrics)
 
         self.model_stage_metrics = nn.ModuleDict({
-            ModelStage.TRAIN.value: base_metrics.clone(prefix=ModelStage.TRAIN.prefix),
-            ModelStage.VAL.value: base_metrics.clone(prefix=ModelStage.VAL.prefix),
-            ModelStage.TEST.value: base_metrics.clone(prefix=ModelStage.TEST.prefix),
+            ModelStage.TRAIN: base_metrics.clone(prefix=ModelStage.TRAIN.prefix),
+            ModelStage.VAL: base_metrics.clone(prefix=ModelStage.VAL.prefix),
+            ModelStage.TEST: base_metrics.clone(prefix=ModelStage.TEST.prefix),
         })
 
     def _build_model(self):
@@ -66,7 +66,7 @@ class NoduleFeaturesModel(L.LightningModule):
         self.regressor.add_module(f'{RegressionModelConstants.DENSE_BLOCK_NAME_PREFIX}1',
                                   DenseBlock(128, 64)) 
         self.regressor.add_module(RegressionModelConstants.OUTPUT_LAYER_NAME,
-                                  nn.Linear(64, len(Features)))
+                                  nn.Linear(64, len(Features)-1)) #decreasing by 1 to exclude annotation count
 
     def forward(self, x):
         features = self.feature_extractor(x)
@@ -78,7 +78,7 @@ class NoduleFeaturesModel(L.LightningModule):
         
         loss = self.loss_fn(y_pred, y)
         
-        metric_collection = self.model_stage_metrics[stage.value]
+        metric_collection = self.model_stage_metrics[stage]
         
         metric_collection.update(y_pred, y)
         
@@ -88,17 +88,17 @@ class NoduleFeaturesModel(L.LightningModule):
 
     def training_step(self, batch, batch_idx):
         _, _, loss = self._common_step(batch, batch_idx, ModelStage.TRAIN)
-        self.log(Metrics.DEFAULT_METRIC_LOSS.get_variant(ModelStage.TRAIN), loss, prog_bar=True)
+        self.log(Metrics.DEFAULT_LOSS.get_variant(ModelStage.TRAIN), loss, prog_bar=True)
         return loss
 
     def validation_step(self, batch, batch_idx):
         _, _, loss = self._common_step(batch, batch_idx, ModelStage.VAL)
-        self.log(Metrics.DEFAULT_METRIC_LOSS.get_variant(ModelStage.VAL), loss, prog_bar=True)
+        self.log(Metrics.DEFAULT_LOSS.get_variant(ModelStage.VAL), loss, prog_bar=True)
         return loss
     
     def test_step(self, batch, batch_idx):
         _, _, loss = self._common_step(batch, batch_idx, ModelStage.TEST)
-        self.log(Metrics.DEFAULT_METRIC_LOSS.get_variant(ModelStage.TEST), loss, prog_bar=True)
+        self.log(Metrics.DEFAULT_LOSS.get_variant(ModelStage.TEST), loss, prog_bar=True)
         return loss
 
     def configure_optimizers(self):
@@ -116,7 +116,7 @@ class NoduleFeaturesModel(L.LightningModule):
                 "optimizer": optimizer,
                 "lr_scheduler": {
                     "scheduler": scheduler,
-                    "monitor": Metrics.DEFAULT_METRIC_LOSS.get_variant(ModelStage.VAL), 
+                    "monitor": Metrics.DEFAULT_LOSS.get_variant(ModelStage.VAL), 
                     "interval": "epoch",
                     "frequency": 1,
                 },

@@ -176,7 +176,7 @@ class CTScanProcessor:
 
             bbox = BoundingBoxConverter.compute_nodule_bbox_yolo(
                 nodule.centroid_zyx,
-                features[Features.DIAMETER_MM.value],
+                features[Features.DIAMETER_MM],
                 volume_shape,
                 self.config.target_spacing,
                 self.config.bbox_padding_factor,
@@ -226,8 +226,8 @@ class CTScanProcessor:
     # ══════════════════════════════════════════
 
     def _is_valid_nodule(self, features: Dict) -> bool:
-        diameter = features.get(Features.DIAMETER_MM.value, 0)
-        annot_count = features.get(Features.ANNOTATION_COUNT.value, 0)
+        diameter = features.get(Features.DIAMETER_MM, 0)
+        annot_count = features.get(Features.ANNOTATION_COUNT, 0)
         diameter_valid = (
             self.config.min_nodule_diameter <= diameter <= self.config.max_nodule_diameter
         )
@@ -303,10 +303,10 @@ class CTScanProcessor:
     def _build_metadata(filename, patient_id, split, nodule: NoduleData,
                          slice_idx, bbox, save_result, volume_shape) -> Dict:
 
-        feature_dict = {feature.value: nodule.features[feature.value] for feature in Features}
-        centroid_dict = {cent.value: val for cent, val in zip(CENTROID, nodule.centroid_zyx)}
-        bbox_dict = {bbox_dim.value: dim_value for bbox_dim, dim_value in zip(BBOX, bbox)}
-        volume_dict = {vol_dim.value: vol_shape for vol_dim, vol_shape in zip(VOLUME, volume_shape)}
+        feature_dict = {feature: nodule.features[feature] for feature in Features}
+        centroid_dict = dict(zip(CENTROID, nodule.centroid_zyx))
+        bbox_dict = dict(zip(BBOX, bbox))
+        volume_dict = dict(zip(VOLUME, volume_shape))
 
         return {
             DatasetConstants.FILE_NAME: filename,

@@ -53,7 +53,7 @@ class NoduleAnnotationProcessor:
         This function computes consensus features using averaging.
         """
         default_features = DEFAULT_FEATURES
-        default_features[Features.DIAMETER_MM.value] = fallback_diameter
+        default_features[Features.DIAMETER_MM] = fallback_diameter
 
         def get_feature_value(feature_scores, feature_key):
             """Return the feature value if scores exist, otherwise return default."""
@@ -76,27 +76,27 @@ class NoduleAnnotationProcessor:
         diameters = list(map(BoundingBoxConverter.compute_diameter, bboxs))
         
         return  {
-            Features.DIAMETER_MM.value: get_feature_value(
-                diameters, Features.DIAMETER_MM.value),
-            Features.MALIGNANCY.value: get_feature_value(
-                malignancy_scores,Features.MALIGNANCY.value),
-            Features.SPICULATION.value: get_feature_value(
-                spiculation_scores, Features.SPICULATION.value),
-            Features.LOBULATION.value: get_feature_value(
-                lobulation_scores, Features.LOBULATION.value),
-            Features.SUBTLETY.value: get_feature_value(
-                subtlety_scores,Features.SUBTLETY.value),
-            Features.SPHERICITY.value: get_feature_value(
-                sphericity_scores, Features.SPHERICITY.value),
-            Features.MARGIN.value: get_feature_value(
-                margin_scores, Features.MARGIN.value),
-            Features.TEXTURE.value: get_feature_value(
-                texture_scores,Features.TEXTURE.value),
-            Features.CALCIFICATION.value: get_feature_value(
-                calcification_scores, Features.CALCIFICATION.value),
-            Features.INTERNAL_STRUCTURE.value : get_feature_value(
-                internal_structure_scores,Features.INTERNAL_STRUCTURE.value),
-            Features.ANNOTATION_COUNT.value: len(annotations)
+            Features.DIAMETER_MM: get_feature_value(
+                diameters, Features.DIAMETER_MM),
+            Features.MALIGNANCY: get_feature_value(
+                malignancy_scores,Features.MALIGNANCY),
+            Features.SPICULATION: get_feature_value(
+                spiculation_scores, Features.SPICULATION),
+            Features.LOBULATION: get_feature_value(
+                lobulation_scores, Features.LOBULATION),
+            Features.SUBTLETY: get_feature_value(
+                subtlety_scores,Features.SUBTLETY),
+            Features.SPHERICITY: get_feature_value(
+                sphericity_scores, Features.SPHERICITY),
+            Features.MARGIN: get_feature_value(
+                margin_scores, Features.MARGIN),
+            Features.TEXTURE: get_feature_value(
+                texture_scores,Features.TEXTURE),
+            Features.CALCIFICATION: get_feature_value(
+                calcification_scores, Features.CALCIFICATION),
+            Features.INTERNAL_STRUCTURE : get_feature_value(
+                internal_structure_scores,Features.INTERNAL_STRUCTURE),
+            Features.ANNOTATION_COUNT: len(annotations)
         }
         
     
