@@ -1,6 +1,9 @@
 from enum import Enum,StrEnum
+from pathlib import Path
+
 class DatasetConstants:
-    
+    PROJECT_ROOT = Path(__file__).parents[2]
+    DATASET_DIR = PROJECT_ROOT / "DetectionModel" /"datasets_clean" / "metadata" / "regression_dataset.csv"
     FILE_NAME = 'filename'
     PATIENT_ID = 'patient_id'
     SPLIT_GROUP = 'split_group'

@@ -9,6 +9,7 @@ class Metrics(StrEnum):
     DEFAULT_LOSS='loss'
     R2='r2'
     RMSE='rmse'
+    MAE="mae"
 
     def get_variant(self,variant):
         

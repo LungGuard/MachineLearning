@@ -22,10 +22,10 @@ logger = logging.getLogger(__name__)
 
 
 TARGET_FEATURES = [
-    f.value for f in Features
+    f for f in Features if f != Features.ANNOTATION_COUNT
 ]
 
-BBOX_COLUMNS = [ bbox.value for bbox in BBOX ]
+BBOX_COLUMNS = list(BBOX)
 
 
 
@@ -230,8 +230,8 @@ class RegressionDataModule(L.LightningDataModule):
         df = pd.read_csv(self.metadata_csv)
         self._validate_dataframe(df)
 
-        split_map = {stage : df[df[DatasetConstants.SPLIT_GROUP]] == stage 
-                     for stage in ModelStage}
+        split_map = {model_stage : df[df[DatasetConstants.SPLIT_GROUP] == model_stage ]
+                     for model_stage in ModelStage}
 
 
         self._log_split_stats(split_map)

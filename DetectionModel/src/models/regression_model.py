@@ -12,6 +12,11 @@ from constants.common.model_stages import ModelStage
 from utils.pt_layers.Conv2D_block import Conv2DBlock
 from utils.pt_layers.DenseBlock import DenseBlock
 
+
+TARGET_FEATURES = [
+    f for f in Features if f != Features.ANNOTATION_COUNT
+]
+
 class NoduleFeaturesModel(L.LightningModule):
     def __init__(self,
                  input_shape = RegressionModelConstants.DEFAULT_INPUT_SHAPE,
@@ -39,7 +44,8 @@ class NoduleFeaturesModel(L.LightningModule):
         else:
             return MetricCollection({
                 Metrics.RMSE: torchmetrics.MeanSquaredError(squared=False),
-                Metrics.R2: torchmetrics.R2Score()
+                Metrics.MAE: torchmetrics.MeanAbsoluteError(),
+                Metrics.R2: torchmetrics.R2Score(len(TARGET_FEATURES))
             })
     
     def _setup_metrics(self, metrics):
@@ -66,7 +72,7 @@ class NoduleFeaturesModel(L.LightningModule):
         self.regressor.add_module(f'{RegressionModelConstants.DENSE_BLOCK_NAME_PREFIX}1',
                                   DenseBlock(128, 64)) 
         self.regressor.add_module(RegressionModelConstants.OUTPUT_LAYER_NAME,
-                                  nn.Linear(64, len(Features)-1)) #decreasing by 1 to exclude annotation count
+                                  nn.Linear(64, len(TARGET_FEATURES))) #decreasing by 1 to exclude annotation count
 
     def forward(self, x):
         features = self.feature_extractor(x)
@@ -122,7 +128,7 @@ class NoduleFeaturesModel(L.LightningModule):
                 },
             }
         
-def predict_features(self, x):
+    def predict_features(self, x):
         self.eval() 
 
         with torch.no_grad():
