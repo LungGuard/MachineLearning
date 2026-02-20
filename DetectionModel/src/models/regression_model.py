@@ -53,9 +53,9 @@ class NoduleFeaturesModel(L.LightningModule):
         base_metrics = self._init_metrics(metrics)
 
         self.model_stage_metrics = nn.ModuleDict({
-            ModelStage.TRAIN: base_metrics.clone(prefix=ModelStage.TRAIN.prefix),
-            ModelStage.VAL: base_metrics.clone(prefix=ModelStage.VAL.prefix),
-            ModelStage.TEST: base_metrics.clone(prefix=ModelStage.TEST.prefix),
+            ModelStage.TRAIN.prefix: base_metrics.clone(prefix=ModelStage.TRAIN.prefix),
+            ModelStage.VAL.prefix: base_metrics.clone(prefix=ModelStage.VAL.prefix),
+            ModelStage.TEST.prefix: base_metrics.clone(prefix=ModelStage.TEST.prefix),
         })
 
     def _build_model(self):
@@ -85,7 +85,7 @@ class NoduleFeaturesModel(L.LightningModule):
         
         loss = self.loss_fn(y_pred, y)
         
-        metric_collection = self.model_stage_metrics[stage]
+        metric_collection = self.model_stage_metrics[stage.prefix]
         
         metric_collection.update(y_pred, y)
         
@@ -116,7 +116,6 @@ class NoduleFeaturesModel(L.LightningModule):
                 mode='min', 
                 factor=0.1, 
                 patience=5, 
-                verbose=True
             )
             
             return {

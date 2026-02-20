@@ -22,7 +22,7 @@ class NtfyNotificationService:
 
     @staticmethod
     def format_metrics_msg(metrics):
-        return "\n".join(f"{metric}: {value:.4f}" for metric, value in metrics.items())
+        return "\n".join(f"{metric}: {value:.4f}" for metric, value in sorted(metrics.items()))
 
     def send_message(self, msg, title=None, priority=NotificationPriority.DEFAULT, tags=None):
         headers = {
