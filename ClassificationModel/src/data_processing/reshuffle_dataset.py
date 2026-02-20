@@ -8,7 +8,7 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-from constants.classification.datasets_constants import DatasetConstants
+from ClassificationModel.constants.constants.dataset import DatasetConstants
 # --- CONFIGURATION ---
 # The path to your CURRENT (problematic) merged dataset
 SOURCE_DATASET_DIR = DatasetConstants.UNIFIED_DATASET_DIR 

@@ -15,7 +15,8 @@ import numpy as np
 import torch
 from monai.transforms import ScaleIntensityRange, Zoom
 
-from constants.detection.preprocessing_constants import PreProcessingConstants,HUValues,IntensityRange
+from DetectionModel.constants.constants.preprocessing import PreProcessingConstants, IntensityRange
+from DetectionModel.constants.enums.hu_values import HUValues
 
 logger = logging.getLogger(__name__)
 

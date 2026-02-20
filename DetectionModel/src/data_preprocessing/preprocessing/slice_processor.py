@@ -11,7 +11,8 @@ import cv2
 from scipy.ndimage import zoom
 from typing import Tuple, Optional
 import logging
-from constants.detection.preprocessing_constants import HUValues,PreProcessingConstants
+from DetectionModel.constants.enums.hu_values import HUValues
+from DetectionModel.constants.constants.preprocessing import PreProcessingConstants
 
 logger = logging.getLogger(__name__)
 

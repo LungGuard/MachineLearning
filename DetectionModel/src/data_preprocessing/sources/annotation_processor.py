@@ -5,8 +5,8 @@ Utilities for processing nodule annotations from radiologists.
 
 import numpy as np
 from typing import Tuple, Optional, List
-from constants.detection.centorid_enum import CENTROID
-from constants.detection.features_enum import Features,DEFAULT_FEATURES
+from DetectionModel.constants.enums.centroid import CENTROID
+from DetectionModel.constants.enums.features import Features, DEFAULT_FEATURES
 from ..core.coordinate_transformer import CoordinateTransformer
 from ..preprocessing.bbox_converter import BoundingBoxConverter
 import contextlib

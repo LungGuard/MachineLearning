@@ -1,1 +1,0 @@
-# Detection stage constants

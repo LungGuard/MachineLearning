@@ -4,13 +4,14 @@ import torch.nn as nn
 import torchmetrics
 from torchmetrics import MetricCollection
 
-from constants.detection.model_constants import RegressionModelConstants,NoduleFeatures
-from constants.detection.features_enum import Features
-from constants.common.metrics_constants import Metrics
-from constants.common.model_stages import ModelStage
+from DetectionModel.constants.constants.regression_model import RegressionModelConstants
+from DetectionModel.constants.dataclasses.nodule_features import NoduleFeatures
+from DetectionModel.constants.enums.features import Features
+from common.constants.metrics import Metrics
+from common.constants.model_stages import ModelStage
 
-from utils.pt_layers.Conv2D_block import Conv2DBlock
-from utils.pt_layers.DenseBlock import DenseBlock
+from common.layers.conv2d_block import Conv2DBlock
+from common.layers.dense_block import DenseBlock
 
 
 TARGET_FEATURES = [

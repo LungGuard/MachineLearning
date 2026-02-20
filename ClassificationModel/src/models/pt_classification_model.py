@@ -1,9 +1,9 @@
 import numpy as np
 from pathlib import Path
 import matplotlib.pyplot as plt
-from constants.classification.model_constants import ModelConstants
-from constants.classification.datasets_constants import DatasetConstants
-from utils.base_pt_cnn_model import BaseCNNModel
+from ClassificationModel.constants.constants.model import ModelConstants
+from ClassificationModel.constants.constants.dataset import DatasetConstants
+from common.base_cnn_model import BaseCNNModel
 import torch
 import torch.nn as nn
 

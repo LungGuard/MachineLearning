@@ -56,7 +56,7 @@ from terminal_ui import (
     setup_rich_logging,
 )
 from pipeline_wizard import LiveDashboard, run_interactive_cleanup
-from constants.common.model_stages import ModelStage
+from common.constants.model_stages import ModelStage
 
 
 logger = logging.getLogger(__name__)

@@ -10,11 +10,11 @@ from PIL import Image
 from torchvision import transforms
 import logging
 
-from constants.detection.features_enum import Features
-from constants.detection.bbox_enum import BBOX
-from constants.common.model_stages import ModelStage
-from constants.detection.transforms_values import TransformValues
-from constants.detection.dataset_constants import DatasetConstants
+from DetectionModel.constants.enums.features import Features
+from DetectionModel.constants.enums.bbox import BBOX
+from common.constants.model_stages import ModelStage
+from DetectionModel.constants.dataclasses.transforms import TransformValues
+from DetectionModel.constants.constants.dataset import DatasetConstants
 
 
 logger = logging.getLogger(__name__)

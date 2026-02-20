@@ -2,7 +2,7 @@ from pathlib import Path
 import shutil
 from PIL import Image
 from datasets import load_dataset
-from constants.classification.datasets_constants import HuggingFaceDataSetFields as HuggingFaceFields
+from ClassificationModel.constants.enums.huggingface import HuggingFaceDataSetFields as HuggingFaceFields
 
 
 class DatasetMerger:

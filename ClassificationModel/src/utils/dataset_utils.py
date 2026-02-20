@@ -1,6 +1,6 @@
 from ClassificationModel.src.data_processing.merge_datasets import DatasetMerger
 import os
-from constants.classification.datasets_constants import DatasetConstants
+from ClassificationModel.constants.constants.dataset import DatasetConstants
 import tensorflow as tf
 from ClassificationModel.src.data_processing.image_augmentation import ImageAugmentationPipeline
 import torch

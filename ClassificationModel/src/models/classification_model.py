@@ -9,12 +9,12 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.metrics import confusion_matrix, classification_report
 from datetime import datetime
-from constants.classification.model_constants import ModelConstants
-from constants.classification.datasets_constants import DatasetConstants
+from ClassificationModel.constants.constants.model import ModelConstants
+from ClassificationModel.constants.constants.dataset import DatasetConstants
 from ClassificationModel.src.utils.dataset_utils import load_dataset
-from utils.notification_service import NtfyNotificationService
+from common.notification_service import NtfyNotificationService
 from ClassificationModel.src.data_processing.image_augmentation import ImageAugmentationPipeline,apply_augmentation
-from utils.base_cnn_model import BaseCNNModel
+from common.base_cnn_model import BaseCNNModel
 class CancerClassificationModel(BaseCNNModel):
     def __init__(self, dataset, input_shape, model_name=ModelConstants.MODEL_NAME, checkpoint_path=None):
         super().__init__(input_shape=input_shape, model_name=model_name)

@@ -1,7 +1,7 @@
 import cv2 as cv
 import numpy as np
 import tensorflow as tf
-from constants.classification.augmentation_constants import AugmenterFields
+from ClassificationModel.constants.constants.augmentation import AugmenterFields
 import tensorflow as tf
 
 class ImageAugmentationPipeline:

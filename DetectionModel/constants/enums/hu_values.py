@@ -1,0 +1,11 @@
+from enum import IntEnum
+
+
+class HUValues(IntEnum):
+    AIR_HU = -1000
+    MAX_HU = 3000
+    PADDING_THRESHOLD = -1500
+    OFFSET_THRESHOLD = -100
+    OFFSET_CORRECTION = 1024
+    VALID_PIXEL_MAX = 4000
+    OFFSET_PERCENTILE = 5

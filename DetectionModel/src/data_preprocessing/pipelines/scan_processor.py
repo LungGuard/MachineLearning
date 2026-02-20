@@ -23,11 +23,11 @@ from typing import List, Dict, Tuple, Optional
 
 import numpy as np
 
-from constants.detection.dataset_constants import DatasetConstants
-from constants.detection.bbox_enum import BBOX
-from constants.detection.volume_enum import VOLUME
-from constants.detection.centorid_enum import CENTROID
-from constants.detection.features_enum import Features
+from DetectionModel.constants.constants.dataset import DatasetConstants
+from DetectionModel.constants.enums.bbox import BBOX
+from DetectionModel.constants.enums.volume import VOLUME
+from DetectionModel.constants.enums.centroid import CENTROID
+from DetectionModel.constants.enums.features import Features
 
 from ..preprocessing.bbox_converter import BoundingBoxConverter
 
