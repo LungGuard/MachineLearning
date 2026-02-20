@@ -19,29 +19,6 @@ class DatasetConstants:
     MIN_CROP_SIZE = 4
     DEFAULT_CROP_SIZE = 64
 
-    class Features:
-        FEATURE_DIAMETER_MM = 'diameter_mm'
-        FEATURE_MALIGNANCY = 'malignancy'
-        FEATURE_SPICULATION = 'spiculation'
-        FEATURE_LOBULATION = 'lobulation'
-        FEATURE_SUBTLETY = 'subtlety'
-        FEATURE_SPHERICITY = 'sphericity'
-        FEATURE_MARGIN='margin'
-        FEATURE_TEXTURE = 'texture'
-        FEATURE_CALCIFICATION = 'calcification'
-        FEATURE_ANNOTATION_COUNT = 'annotation_count'
-        FEATURE_INTERNAL_STRUCTURE = 'internal_structure'
-        DEFAULT_FEATURES = {
-            FEATURE_MALIGNANCY : 3.0,  # Indeterminate
-            FEATURE_SPICULATION : 1.0,
-            FEATURE_LOBULATION : 1.0,
-            FEATURE_SUBTLETY : 3.0,
-            FEATURE_SPHERICITY : 3.0,
-            FEATURE_MARGIN : 3.0,
-            FEATURE_TEXTURE : 3.0,
-            FEATURE_CALCIFICATION : 1.0,
-            FEATURE_INTERNAL_STRUCTURE : 1.0,
-        }
 
 
     

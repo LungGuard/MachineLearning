@@ -39,10 +39,8 @@ class SlicePreprocessor:
         Returns:
             Cleaned volume ready for resampling
         """
-        # 1. Cast to float32 for precision
         volume = volume.astype(np.float32)
 
-        # 2. Handle NaNs
         nan_count = np.isnan(volume).sum()
         if nan_count > 0:
             logger.warning(f"Found {nan_count} NaN values, replacing with -1000")
@@ -190,16 +188,14 @@ class SlicePreprocessor:
         h, w = slice_2d.shape[:2]
 
         if not preserve_aspect_ratio:
-            # Simple resize without aspect ratio preservation
-            resized = cv2.resize(slice_2d, (target_w, target_h), interpolation=cv2.INTER_LINEAR)
-            return resized
-
+            return cv2.resize(
+                slice_2d, (target_w, target_h), interpolation=cv2.INTER_LINEAR
+            )
         # Preserve aspect ratio with padding
         scale = min(target_h / h, target_w / w)
         new_h = int(h * scale)
         new_w = int(w * scale)
 
-        # Resize image
         resized = cv2.resize(slice_2d, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
 
         # Create padded output

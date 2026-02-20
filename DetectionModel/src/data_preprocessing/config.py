@@ -21,10 +21,9 @@ class DataPrepConfig:
     window_width: float = 1500.0
     
     bbox_padding_factor: float = 1.5
-    class_id: int = 0  # 0 = nodule/anomaly
+    class_id: int = 0  
 
-    # Output image size for YOLO (all images will be resized to this)
-    output_image_size: Tuple[int, int] = (512, 512)  # (height, width)
+    output_image_size: Tuple[int, int] = (512, 512) 
     use_center_crop: bool = True  # True = center crop (fills frame), False = padding (black bars)
 
     min_nodule_diameter: float = 3.0  # mm

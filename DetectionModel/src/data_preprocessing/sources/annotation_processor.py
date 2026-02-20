@@ -15,7 +15,6 @@ import contextlib
 class NoduleAnnotationProcessor:
     """Utilities for processing nodule annotations from radiologists."""
     
-    import contextlib
     @staticmethod
     def _safe_extract_bbox(ann):
         """Safely extract bounding box from annotation."""
@@ -30,8 +29,7 @@ class NoduleAnnotationProcessor:
         """Safely extract centroid from annotation."""
         try:
             centroid = ann.centroid
-            # Validate centroid exists and has correct dimensions
-            return centroid if centroid is not None and len(centroid) == 3 else None
+            return centroid if centroid and len(centroid) == 3 else None
         except Exception:
             return None
     
@@ -177,7 +175,7 @@ class NoduleAnnotationProcessor:
             CoordinateTransformer.transform_coordinates_to_resampled(
                 avg_centroid, original_spacing, target_spacing
             )
-            if original_spacing is not None
+            if original_spacing
             else avg_centroid
         )
 

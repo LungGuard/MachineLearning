@@ -40,9 +40,7 @@ def main() -> Path:
     )
 
     mode = PipelineMode(config_dict["mode"])
-    result = _dispatch(mode, config, config_dict.get("num_workers"))
-
-    return result
+    return _dispatch(mode, config, config_dict.get("num_workers"))
 
 
 def _dispatch(mode: PipelineMode, config: DataPrepConfig, num_workers=None) -> Path:
@@ -66,4 +64,4 @@ if __name__ == "__main__":
         main()
     except KeyboardInterrupt:
         print_error("Interrupted.")
-        sys.exit(1)
+        sys.exit()

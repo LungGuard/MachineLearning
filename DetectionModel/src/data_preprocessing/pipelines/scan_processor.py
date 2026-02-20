@@ -176,7 +176,7 @@ class CTScanProcessor:
 
             bbox = BoundingBoxConverter.compute_nodule_bbox_yolo(
                 nodule.centroid_zyx,
-                features[DatasetConstants.Features.FEATURE_DIAMETER_MM],
+                features[Features.DIAMETER_MM.value],
                 volume_shape,
                 self.config.target_spacing,
                 self.config.bbox_padding_factor,
@@ -226,8 +226,8 @@ class CTScanProcessor:
     # ══════════════════════════════════════════
 
     def _is_valid_nodule(self, features: Dict) -> bool:
-        diameter = features.get(DatasetConstants.Features.FEATURE_DIAMETER_MM, 0)
-        annot_count = features.get(DatasetConstants.Features.FEATURE_ANNOTATION_COUNT, 0)
+        diameter = features.get(Features.DIAMETER_MM.value, 0)
+        annot_count = features.get(Features.ANNOTATION_COUNT.value, 0)
         diameter_valid = (
             self.config.min_nodule_diameter <= diameter <= self.config.max_nodule_diameter
         )
@@ -303,14 +303,10 @@ class CTScanProcessor:
     def _build_metadata(filename, patient_id, split, nodule: NoduleData,
                          slice_idx, bbox, save_result, volume_shape) -> Dict:
 
-        features = nodule.features
-        nodule_centroid = nodule.centroid_zyx
-
-
-        features = {feature.value : features[feature.value] for feature in Features}
-        centorid_dict={cent.value:centroid_dim for cent,centroid_dim in zip(CENTROID,nodule_centroid)}
-        bbox_dict = {bbox_dim.value : dim_value for bbox_dim,dim_value in zip(BBOX,bbox)}
-        volume_dict = {vol_dim.value : vol_shape for vol_dim,vol_shape in zip(VOLUME,volume_shape)}
+        feature_dict = {feature.value: nodule.features[feature.value] for feature in Features}
+        centroid_dict = {cent.value: val for cent, val in zip(CENTROID, nodule.centroid_zyx)}
+        bbox_dict = {bbox_dim.value: dim_value for bbox_dim, dim_value in zip(BBOX, bbox)}
+        volume_dict = {vol_dim.value: vol_shape for vol_dim, vol_shape in zip(VOLUME, volume_shape)}
 
         return {
             DatasetConstants.FILE_NAME: filename,
@@ -318,8 +314,8 @@ class CTScanProcessor:
             DatasetConstants.SPLIT_GROUP: split,
             DatasetConstants.NOUDLE_INDEX: nodule.index,
             DatasetConstants.SLICE_INDEX: slice_idx,
-            **features,
-            **centorid_dict,
+            **feature_dict,
+            **centroid_dict,
             **bbox_dict,
             DatasetConstants.IMAGE_PATH: save_result.image_path,
             DatasetConstants.LABEL_PATH: save_result.label_path,
