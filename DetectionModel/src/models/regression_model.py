@@ -9,6 +9,7 @@ from DetectionModel.constants.dataclasses.nodule_features import NoduleFeatures
 from DetectionModel.constants.enums.features import Features
 from common.constants.metrics import Metrics
 from common.constants.model_stages import ModelStage
+from common.mixins import ModelMixin
 
 from common.layers.conv2d_block import Conv2DBlock
 from common.layers.dense_block import DenseBlock
@@ -16,9 +17,9 @@ from common.layers.dense_block import DenseBlock
 
 TARGET_FEATURES = [
     f for f in Features if f != Features.ANNOTATION_COUNT
-]
+] #Excluding the annotation count feature
 
-class NoduleFeaturesModel(L.LightningModule):
+class NoduleFeaturesModel(L.LightningModule,ModelMixin):
     def __init__(self,
                  input_shape = RegressionModelConstants.DEFAULT_INPUT_SHAPE,
                  learning_rate : float = RegressionModelConstants.DEFAULT_LEARNING_RATE,
@@ -59,21 +60,28 @@ class NoduleFeaturesModel(L.LightningModule):
         })
 
     def _build_model(self):
-        self.feature_extractor.add_module(f'{RegressionModelConstants.CONV_BLOCK_NAME_PREFIX}1',
-                                          Conv2DBlock(self.channels, 32))
-        self.feature_extractor.add_module(f'{RegressionModelConstants.CONV_BLOCK_NAME_PREFIX}2',
-                                          Conv2DBlock(32, 64))
-        self.feature_extractor.add_module(f'{RegressionModelConstants.CONV_BLOCK_NAME_PREFIX}3',
-                                          Conv2DBlock(64, 128))
-        self.feature_extractor.add_module(RegressionModelConstants.BRIDGE_LAYER_NAME,
-                                          nn.AdaptiveAvgPool2d((1, 1)))
-        self.feature_extractor.add_module(RegressionModelConstants.FLATTEN_LAYER_NAME,
-                                          nn.Flatten())
+        self._add_chained_blocks(
+            target=self.feature_extractor,
+            channel_sizes=[self.channels,32,64,128],
+            name_prefix=RegressionModelConstants.CONV_BLOCK_NAME_PREFIX,
+            block_class=Conv2DBlock
+        )
 
-        self.regressor.add_module(f'{RegressionModelConstants.DENSE_BLOCK_NAME_PREFIX}1',
-                                  DenseBlock(128, 64)) 
+        self._add_multiple_layers(target=self.feature_extractor,
+                                  layers=[
+                                    (RegressionModelConstants.BRIDGE_LAYER_NAME,nn.AdaptiveAvgPool2d((1, 1))),
+                                    (RegressionModelConstants.FLATTEN_LAYER_NAME,nn.Flatten())
+                                         ])
+
+        self._add_chained_blocks(
+        target=self.regressor,
+        channel_sizes=[128, 64],
+        name_prefix=RegressionModelConstants.DENSE_BLOCK_NAME_PREFIX,
+        block_class=DenseBlock,
+        )
+
         self.regressor.add_module(RegressionModelConstants.OUTPUT_LAYER_NAME,
-                                  nn.Linear(64, len(TARGET_FEATURES))) #decreasing by 1 to exclude annotation count
+                                  nn.Linear(64, len(TARGET_FEATURES))) 
 
     def forward(self, x):
         features = self.feature_extractor(x)
