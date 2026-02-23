@@ -10,6 +10,7 @@ from DetectionModel.constants.enums.features import Features
 from common.constants.metrics import Metrics
 from common.constants.model_stages import ModelStage
 from common.mixins import ModelMixin
+from common.constants import HyperParameters
 
 from common.layers.conv2d_block import Conv2DBlock
 from common.layers.dense_block import DenseBlock
@@ -23,10 +24,13 @@ class NoduleFeaturesModel(L.LightningModule,ModelMixin):
     def __init__(self,
                  input_shape = RegressionModelConstants.DEFAULT_INPUT_SHAPE,
                  learning_rate : float = RegressionModelConstants.DEFAULT_LEARNING_RATE,
-                 metrics=None):
+                 metrics=None,
+                 conv_layers_channels = (32,64,128),
+                 dense_layers_channels =(128, 64)):
         super(NoduleFeaturesModel, self).__init__()
-        
-        self.save_hyperparameters() 
+
+        self.save_hyperparameters(ignore=[HyperParameters.METRICS,
+                                          HyperParameters.LAYERS])
 
         self.input_shape = input_shape
         self.channels, self.height, self.width = input_shape
@@ -37,7 +41,8 @@ class NoduleFeaturesModel(L.LightningModule,ModelMixin):
         
         self.loss_fn = nn.MSELoss() 
         
-        self._build_model()
+        self._build_model(conv_layers=conv_layers_channels,
+                          dense_layers=dense_layers_channels)
         self._setup_metrics(metrics)
 
     def _init_metrics(self, metrics):
@@ -59,10 +64,10 @@ class NoduleFeaturesModel(L.LightningModule,ModelMixin):
             ModelStage.TEST.prefix: base_metrics.clone(prefix=ModelStage.TEST.prefix),
         })
 
-    def _build_model(self):
+    def _build_model(self,conv_layers,dense_layers):
         self._add_chained_blocks(
             target=self.feature_extractor,
-            channel_sizes=[self.channels,32,64,128],
+            channel_sizes=(self.channels,*conv_layers),
             name_prefix=RegressionModelConstants.CONV_BLOCK_NAME_PREFIX,
             block_class=Conv2DBlock
         )
@@ -75,7 +80,7 @@ class NoduleFeaturesModel(L.LightningModule,ModelMixin):
 
         self._add_chained_blocks(
         target=self.regressor,
-        channel_sizes=[128, 64],
+        channel_sizes=dense_layers,
         name_prefix=RegressionModelConstants.DENSE_BLOCK_NAME_PREFIX,
         block_class=DenseBlock,
         )
@@ -137,10 +142,9 @@ class NoduleFeaturesModel(L.LightningModule,ModelMixin):
             }
         
     def predict_features(self, x):
-        self.eval() 
-
-        with torch.no_grad():
-            raw_vectors = self(x)
-            raw_vectors=raw_vectors.cpu()
-            
-        return [NoduleFeatures.from_tensor(prediction) for prediction in raw_vectors]
+        was_training = self.training
+        self.eval()
+        with torch.inference_mode():
+            raw_vectors = self(x).cpu()
+        self.train(was_training)
+        return [NoduleFeatures.from_tensor(p) for p in raw_vectors]

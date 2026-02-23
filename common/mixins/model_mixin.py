@@ -1,15 +1,15 @@
 from functools import reduce
 import torch.nn as nn
-
+from typing import Union
 class ModelMixin:
-    def _add_chained_blocks(self, target: nn.Sequential, channel_sizes: list[int], name_prefix: str, block_class: type) -> nn.Sequential:
+    def _add_chained_blocks(self, target: nn.Sequential, channel_sizes: Union[list[int],tuple[int]], name_prefix: str, block_class: type) -> nn.Sequential:
         """
         Adds a chain of layers to a Sequential container, automatically wiring
         each block's output channels as the next block's input channels.
 
         Args:
             target: The nn.Sequential container to attach layers to.
-            channel_sizes: List of channel dimensions. Consecutive pairs become
+            channel_sizes: List or tuple of channel dimensions. Consecutive pairs become
                           (in_channels, out_channels) for each block.
                           e.g. [1, 32, 64, 128] → Block(1,32), Block(32,64), Block(64,128)
             name_prefix: Naming prefix for each layer, suffixed with a 1-based index.
@@ -30,13 +30,14 @@ class ModelMixin:
             named_blocks,
             target,
         )
-    def _add_multiple_layers(self,target: nn.Sequential,layers:list[tuple[str,nn.Module]]):
+    def _add_multiple_layers(self,target: nn.Sequential,
+                             layers:Union[list[tuple[str,nn.Module]],tuple[tuple[str,nn.Module]]]):
         """
         Adds multiple layers at once, mainly used for readability
 
         Args:
             target: The nn.Sequential container to attach layers to.
-            layers: a list of tuples containing the layer name and the nn module of the layer
+            layers: a list or a tuple of tuples containing the layer name and the nn module of the layer
 
         Returns:
             The same target Sequential with all blocks attached.

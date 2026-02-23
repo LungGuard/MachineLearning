@@ -21,3 +21,4 @@ class RegressionModelConstants:
     EXCEPTION_CHECKPOINT_FILE_NAME = "exception_reg_model_checkpoint"
     BEST_MODEL_CHECKPOINT_NAME = "best_reg_model"
     LOG_DIR = LOG_DIR_PATH
+    
