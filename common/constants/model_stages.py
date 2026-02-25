@@ -1,6 +1,5 @@
 from enum import StrEnum
 
-
 class ModelStage(StrEnum):
     TRAIN = "train"
     VAL = "val"

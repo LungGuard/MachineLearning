@@ -13,10 +13,18 @@ class Features(StrEnum):
     CALCIFICATION = 'calcification'
     INTERNAL_STRUCTURE = 'internal_structure'
     ANNOTATION_COUNT = 'annotation_count'
+    
+
+    @classmethod
+    def getNoduleFeaturesVector(cls):
+        return  [
+            f for f in cls if f is not cls.ANNOTATION_COUNT
+        ]
+
 
 
 DEFAULT_FEATURES = {
-    Features.MALIGNANCY: 3.0,
+    Features.MALIGNANCY: 3.0, 
     Features.SPICULATION: 1.0,
     Features.LOBULATION: 1.0,
     Features.SUBTLETY: 3.0,

@@ -1,8 +1,17 @@
+from abc import abstractmethod
 from functools import reduce
 import torch.nn as nn
+from torchmetrics import MetricCollection
 from typing import Union
+
+from common.constants.model_stages import ModelStage
+
 class ModelMixin:
-    def _add_chained_blocks(self, target: nn.Sequential, channel_sizes: Union[list[int],tuple[int]], name_prefix: str, block_class: type) -> nn.Sequential:
+    def _add_chained_blocks(self, 
+                            target: nn.Sequential,
+                            channel_sizes: Union[list[int],tuple[int]], 
+                            name_prefix: str, 
+                            block_class: type) -> nn.Sequential:
         """
         Adds a chain of layers to a Sequential container, automatically wiring
         each block's output channels as the next block's input channels.
@@ -46,3 +55,32 @@ class ModelMixin:
             target.add_module(name=name,
                               module=layer)
         return target
+
+    @abstractmethod
+    def _default_metrics(self) -> MetricCollection:
+        """
+        Return the default MetricCollection for this model.
+        Each subclass must provide its own task-specific defaults.
+        """
+        ...
+
+    def _init_metrics(self, metrics) -> MetricCollection:
+        """
+        Accept user-provided metrics or fall back to subclass defaults.
+        """
+        if metrics is not None:
+            return MetricCollection(metrics) if isinstance(metrics, dict) else metrics
+        return self._default_metrics()
+
+    def _setup_metrics(self, metrics):
+        """
+        Clone the base MetricCollection for each model stage (train/val/test)
+        and store them in an nn.ModuleDict keyed by stage prefix.
+        """
+        base_metrics = self._init_metrics(metrics)
+
+        self.model_stage_metrics = nn.ModuleDict({
+            ModelStage.TRAIN.prefix: base_metrics.clone(prefix=ModelStage.TRAIN.prefix),
+            ModelStage.VAL.prefix: base_metrics.clone(prefix=ModelStage.VAL.prefix),
+            ModelStage.TEST.prefix: base_metrics.clone(prefix=ModelStage.TEST.prefix),
+        })

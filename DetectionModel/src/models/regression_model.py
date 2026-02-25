@@ -3,6 +3,7 @@ import torch
 import torch.nn as nn
 import torchmetrics
 from torchmetrics import MetricCollection
+from typing import Union
 
 from DetectionModel.constants.constants.regression_model import RegressionModelConstants
 from DetectionModel.constants.dataclasses.nodule_features import NoduleFeatures
@@ -16,17 +17,14 @@ from common.layers.conv2d_block import Conv2DBlock
 from common.layers.dense_block import DenseBlock
 
 
-TARGET_FEATURES = [
-    f for f in Features if f != Features.ANNOTATION_COUNT
-] #Excluding the annotation count feature
 
 class NoduleFeaturesModel(L.LightningModule,ModelMixin):
     def __init__(self,
                  input_shape = RegressionModelConstants.DEFAULT_INPUT_SHAPE,
                  learning_rate : float = RegressionModelConstants.DEFAULT_LEARNING_RATE,
-                 metrics=None,
-                 conv_layers_channels = (32,64,128),
-                 dense_layers_channels =(128, 64)):
+                 metrics : Union[dict,MetricCollection] = None,
+                 conv_layers_channels : Union[list[int],tuple[int]] = (32,64,128),
+                 dense_layers_channels : Union[list[int],tuple[int]] =(128, 64)):
         super(NoduleFeaturesModel, self).__init__()
 
         self.save_hyperparameters(ignore=[HyperParameters.METRICS,
@@ -45,23 +43,11 @@ class NoduleFeaturesModel(L.LightningModule,ModelMixin):
                           dense_layers=dense_layers_channels)
         self._setup_metrics(metrics)
 
-    def _init_metrics(self, metrics):
-        if metrics is not None:
-            return MetricCollection(metrics) if isinstance(metrics, dict) else metrics
-        else:
-            return MetricCollection({
-                Metrics.RMSE: torchmetrics.MeanSquaredError(squared=False),
-                Metrics.MAE: torchmetrics.MeanAbsoluteError(),
-                Metrics.R2: torchmetrics.R2Score(len(TARGET_FEATURES))
-            })
-    
-    def _setup_metrics(self, metrics):
-        base_metrics = self._init_metrics(metrics)
-
-        self.model_stage_metrics = nn.ModuleDict({
-            ModelStage.TRAIN.prefix: base_metrics.clone(prefix=ModelStage.TRAIN.prefix),
-            ModelStage.VAL.prefix: base_metrics.clone(prefix=ModelStage.VAL.prefix),
-            ModelStage.TEST.prefix: base_metrics.clone(prefix=ModelStage.TEST.prefix),
+    def _default_metrics(self):
+        return MetricCollection({
+            Metrics.RMSE: torchmetrics.MeanSquaredError(squared=False),
+            Metrics.MAE: torchmetrics.MeanAbsoluteError(),
+            Metrics.R2: torchmetrics.R2Score(len(Features.getNoduleFeaturesVector())),
         })
 
     def _build_model(self,conv_layers,dense_layers):
@@ -85,8 +71,10 @@ class NoduleFeaturesModel(L.LightningModule,ModelMixin):
         block_class=DenseBlock,
         )
 
-        self.regressor.add_module(RegressionModelConstants.OUTPUT_LAYER_NAME,
-                                  nn.Linear(64, len(TARGET_FEATURES))) 
+        self.regressor.add_module(
+                                  RegressionModelConstants.OUTPUT_LAYER_NAME,
+                                  nn.Linear(64, len(Features.getNoduleFeaturesVector()))
+                                  ) 
 
     def forward(self, x):
         features = self.feature_extractor(x)
@@ -99,7 +87,6 @@ class NoduleFeaturesModel(L.LightningModule,ModelMixin):
         loss = self.loss_fn(y_pred, y)
         
         metric_collection = self.model_stage_metrics[stage.prefix]
-        
         metric_collection.update(y_pred, y)
         
         self.log_dict(metric_collection, on_step=False, on_epoch=True, prog_bar=True)
@@ -140,7 +127,6 @@ class NoduleFeaturesModel(L.LightningModule,ModelMixin):
                     "frequency": 1,
                 },
             }
-        
     def predict_features(self, x):
         was_training = self.training
         self.eval()
