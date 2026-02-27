@@ -1,8 +1,9 @@
 from pathlib import Path
 import sys
 
-# Add src directory to Python's module search path so it can find 'common' package
-sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
+# Add project root to Python path
+from paths import ProjectPaths
+sys.path.insert(0, str(ProjectPaths.ROOT))
 
 from ClassificationModel.constants.constants.dataset import DatasetConstants
 

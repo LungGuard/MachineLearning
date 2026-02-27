@@ -80,11 +80,11 @@ class DatasetMerger:
 
 def main():
     """Main execution function."""
-    PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
+    from paths import ProjectPaths
     
-    FIGSHARE_DIR = PROJECT_ROOT / "ClassificationModel" / "datasets" / "figshare_dataset"
-    HUGGINGFACE_CACHE = PROJECT_ROOT / "ClassificationModel" / "datasets" / "hugging_face_dataset"
-    OUTPUT_DIR = PROJECT_ROOT / "ClassificationModel" / "datasets" / "merged_dataset"
+    FIGSHARE_DIR = ProjectPaths.CLASSIFICATION_FIGSHARE_DIR
+    HUGGINGFACE_CACHE = ProjectPaths.CLASSIFICATION_HUGGINGFACE_CACHE
+    OUTPUT_DIR = ProjectPaths.CLASSIFICATION_DATASETS_DIR / "merged_dataset"
     
     merger = DatasetMerger(
         figshare_dir=FIGSHARE_DIR,

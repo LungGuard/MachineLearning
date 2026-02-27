@@ -77,7 +77,8 @@ def save_yolo_yaml(output_dir: str, metadata_df: Optional[pd.DataFrame]) -> Path
     test = _safe_count(metadata_df, SPLIT_COLUMN, 'test')
     
     yaml_content = f"""# LungGuard YOLO Dataset
-path: {output_dir}
+# NOTE: 'path' is resolved at runtime by resolve_dataset_yaml()
+path: .
 train: train/images
 val: val/images
 test: test/images

@@ -5,8 +5,8 @@ import random
 from pathlib import Path
 
 # Add project root to Python path
-project_root = Path(__file__).parent.parent.parent.parent
-sys.path.insert(0, str(project_root))
+from paths import ProjectPaths
+sys.path.insert(0, str(ProjectPaths.ROOT))
 
 from ClassificationModel.constants.constants.dataset import DatasetConstants
 # --- CONFIGURATION ---

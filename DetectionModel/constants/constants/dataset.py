@@ -1,9 +1,9 @@
-from pathlib import Path
+from paths import ProjectPaths
 
 
 class DatasetConstants:
-    PROJECT_ROOT = Path(__file__).parents[3]
-    DATASET_DIR = PROJECT_ROOT / "DetectionModel" / "datasets_clean" / "metadata" / "regression_dataset.csv"
+    PROJECT_ROOT = ProjectPaths.ROOT
+    DATASET_DIR = ProjectPaths.DETECTION_METADATA_CSV
     FILE_NAME = 'filename'
     PATIENT_ID = 'patient_id'
     SPLIT_GROUP = 'split_group'
