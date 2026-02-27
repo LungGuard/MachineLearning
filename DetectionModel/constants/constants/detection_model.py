@@ -1,6 +1,5 @@
 import re
 from pathlib import Path
-
 from paths import ProjectPaths
 
 CHECKPOINT_DIR_PATH = ProjectPaths.DETECTION_CHECKPOINT_DIR

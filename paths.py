@@ -25,7 +25,6 @@ class ProjectPaths:
 
     ROOT = PROJECT_ROOT
 
-    # ── Logs ─────────────────────────────────────────────
     LOGS_DIR = ROOT / "logs"
 
     # ── Detection Model ──────────────────────────────────

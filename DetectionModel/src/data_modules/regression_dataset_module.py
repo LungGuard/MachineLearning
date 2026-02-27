@@ -14,17 +14,14 @@ from DetectionModel.constants.enums.bbox import BBOX
 from common.constants.model_stages import ModelStage
 from DetectionModel.constants.dataclasses.transforms import TransformValues
 from DetectionModel.constants.constants.dataset import DatasetConstants
+from common.constants import HyperParameters
 
 logger = logging.getLogger(__name__)
 
-TARGET_FEATURES = [
-    f for f in Features if f != Features.ANNOTATION_COUNT
-]
 
 BBOX_COLUMNS = list(BBOX)
 
 class AspectRatioPreservingResize:
-    # ... (Keep this class exactly as you wrote it, it's perfect) ...
     def __init__(self, target_size: int = DatasetConstants.DEFAULT_CROP_SIZE):
         self.target_size = target_size
 
@@ -143,11 +140,11 @@ class RegressionDataModule(L.LightningDataModule):
         target_scaler = None 
     ):
         super().__init__()
-        self.save_hyperparameters(ignore=["target_features"])
+        self.save_hyperparameters(ignore=[HyperParameters.TARGET_FEATURES])
 
         self.metadata_csv = Path(metadata_csv)
         self.dataset_root = Path(dataset_root)
-        self.target_features = target_features or TARGET_FEATURES
+        self.target_features = target_features or Features.getNoduleFeaturesVector()
         self.crop_size = crop_size
         self.batch_size = batch_size
         self.num_workers = num_workers
