@@ -20,7 +20,7 @@ def resolve_dataset_yaml(yaml_path: Path = ProjectPaths.DETECTION_DATASET_YAML) 
     text = yaml_path.read_text()
 
     # Replace the `path:` line with the resolved parent directory
-    dataset_dir = str(yaml_path.parent)
+    dataset_dir = str(yaml_path.parent).replace("\\", "/")
     new_text = re.sub(r"(?m)^path:.*$", f"path: {dataset_dir}", text)
 
     yaml_path.write_text(new_text)
