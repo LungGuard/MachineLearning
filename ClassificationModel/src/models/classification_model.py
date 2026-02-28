@@ -15,6 +15,7 @@ from ClassificationModel.src.utils.dataset_utils import load_dataset
 from common.notification_service import NtfyNotificationService
 from ClassificationModel.src.data_processing.image_augmentation import ImageAugmentationPipeline,apply_augmentation
 from common.base_cnn_model import BaseCNNModel
+from common.constants import Activation,Metrics,Loss
 class CancerClassificationModel(BaseCNNModel):
     def __init__(self, dataset, input_shape, model_name=ModelConstants.MODEL_NAME, checkpoint_path=None):
         super().__init__(input_shape=input_shape, model_name=model_name)
@@ -58,17 +59,17 @@ class CancerClassificationModel(BaseCNNModel):
         
         self.model.add(layers.Dense(
             units=self.num_classes,
-            activation=ModelConstants.OUTPUT_ACTIVATION
+            activation=Activation.SOFTMAX
         ))
         
         self.model.compile(
-            optimizer=tf.keras.optimizers.Adam(learning_rate=0.001),
-            loss=ModelConstants.LOSS_CATEGORICAL_CROSSENTROPY,
+            optimizer=tf.keras.optimizers.Adam(learning_rate=1e-3),
+            loss=Loss.CATEGORICAL_CROSSENTROPY,
             metrics=[
-                ModelConstants.METRIC_ACCURACY,
-                tf.keras.metrics.Precision(name=ModelConstants.METRIC_PRECISION),
-                tf.keras.metrics.Recall(name=ModelConstants.METRIC_RECALL),
-                tf.keras.metrics.AUC(name=ModelConstants.METRIC_AUC, multi_label=False)
+                Metrics.ACCURACY,
+                tf.keras.metrics.Precision(name=Metrics.PRECISION),
+                tf.keras.metrics.Recall(name=Metrics.RECALL),
+                tf.keras.metrics.AUC(name=Metrics.AUC, multi_label=False)
             ]
         )
 

@@ -51,7 +51,5 @@ def get_patient_split(patient_id: str, splits: Dict[str, List[str]]) -> str:
         for split_name, pids in splits.items()
         for pid in pids
     }
-    
-    result = split_mapping.get(patient_id, 'train')  # Default to train if not found
-    
-    return result
+
+    return split_mapping.get(patient_id, 'train')

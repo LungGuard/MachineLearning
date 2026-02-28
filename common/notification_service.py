@@ -29,7 +29,7 @@ class NtfyNotificationService:
 
     def send_message(self, msg, title=None,
                       priority=NotificationPriority.DEFAULT,
-                      tags: StrEnum = None):
+                      tags: list[StrEnum] = None):
         headers = {
             NotificationHeaders.PRIORITY: priority,
             NotificationHeaders.TITLE: title or NotificationFields.DEFAULT_TITLE,

@@ -2,6 +2,7 @@ import tensorflow as tf
 from tensorflow.keras import layers
 from pathlib import Path
 from common.base_model import BaseModel
+from common.constants import Activation
 import logging
 
 logger = logging.getLogger(__name__)
@@ -33,7 +34,7 @@ class BaseCNNModel(BaseModel):
             logger.debug(f"Failed to load Keras model: {e}")
             raise e
 
-    def _add_conv_block(self, filters, kernel_size=(3, 3), padding='same', activation='relu'):
+    def _add_conv_block(self, filters, kernel_size=(3, 3), padding='same', activation=Activation.RELU):
         """Helper to add a standard convolution block (Conv -> BN -> MaxPool)."""
         self.model.add(layers.Conv2D(
             filters=filters,
@@ -44,7 +45,7 @@ class BaseCNNModel(BaseModel):
         self.model.add(layers.BatchNormalization())
         self.model.add(layers.MaxPooling2D(pool_size=(2, 2)))
 
-    def _add_dense_block(self, units, activation='relu'):
+    def _add_dense_block(self, units, activation=Activation.RELU):
         self.model.add(layers.Dense(
             units=units,
             activation=activation

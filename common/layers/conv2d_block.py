@@ -1,7 +1,7 @@
 import torch as pt
 import torch.nn as nn
 import torch.nn.functional as F
-
+from ..constants import Activation
 
 class Conv2DBlock(nn.Module):
     def __init__(self,

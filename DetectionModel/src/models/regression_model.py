@@ -11,7 +11,7 @@ from DetectionModel.constants.enums.features import Features
 from common.constants.metrics import Metrics
 from common.constants.model_stages import ModelStage
 from common.mixins import ModelMixin
-from common.constants import HyperParameters
+from common.constants import HyperParameters,Loss
 
 from common.layers.conv2d_block import Conv2DBlock
 from common.layers.dense_block import DenseBlock
@@ -95,17 +95,17 @@ class NoduleFeaturesModel(L.LightningModule,ModelMixin):
 
     def training_step(self, batch, batch_idx):
         _, _, loss = self._common_step(batch, batch_idx, ModelStage.TRAIN)
-        self.log(Metrics.DEFAULT_LOSS.get_variant(ModelStage.TRAIN), loss, prog_bar=True)
+        self.log(Loss.DEFAULT.get_variant(ModelStage.TRAIN), loss, prog_bar=True)
         return loss
 
     def validation_step(self, batch, batch_idx):
         _, _, loss = self._common_step(batch, batch_idx, ModelStage.VAL)
-        self.log(Metrics.DEFAULT_LOSS.get_variant(ModelStage.VAL), loss, prog_bar=True)
+        self.log(Loss.DEFAULT.get_variant(ModelStage.VAL), loss, prog_bar=True)
         return loss
     
     def test_step(self, batch, batch_idx):
         _, _, loss = self._common_step(batch, batch_idx, ModelStage.TEST)
-        self.log(Metrics.DEFAULT_LOSS.get_variant(ModelStage.TEST), loss, prog_bar=True)
+        self.log(Loss.DEFAULT.get_variant(ModelStage.TEST), loss, prog_bar=True)
         return loss
 
     def configure_optimizers(self):
@@ -122,7 +122,7 @@ class NoduleFeaturesModel(L.LightningModule,ModelMixin):
                 "optimizer": optimizer,
                 "lr_scheduler": {
                     "scheduler": scheduler,
-                    "monitor": Metrics.DEFAULT_LOSS.get_variant(ModelStage.VAL), 
+                    "monitor": Loss.DEFAULT.get_variant(ModelStage.VAL), 
                     "interval": "epoch",
                     "frequency": 1,
                 },

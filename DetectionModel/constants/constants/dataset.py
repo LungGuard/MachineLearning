@@ -21,3 +21,4 @@ class DatasetConstants:
     MARGIN_FACTOR = 0.1
     MIN_CROP_SIZE = 4
     DEFAULT_CROP_SIZE = 64
+    
