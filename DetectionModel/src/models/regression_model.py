@@ -16,7 +16,7 @@ from common.constants import HyperParameters
 from common.layers.conv2d_block import Conv2DBlock
 from common.layers.dense_block import DenseBlock
 
-
+TAGRET_FEATURES = Features.getNoduleFeaturesVector()
 
 class NoduleFeaturesModel(L.LightningModule,ModelMixin):
     def __init__(self,
@@ -47,7 +47,7 @@ class NoduleFeaturesModel(L.LightningModule,ModelMixin):
         return MetricCollection({
             Metrics.RMSE: torchmetrics.MeanSquaredError(squared=False),
             Metrics.MAE: torchmetrics.MeanAbsoluteError(),
-            Metrics.R2: torchmetrics.R2Score(len(Features.getNoduleFeaturesVector())),
+            Metrics.R2: torchmetrics.R2Score(len(TAGRET_FEATURES)),
         })
 
     def _build_model(self,conv_layers,dense_layers):
@@ -73,7 +73,7 @@ class NoduleFeaturesModel(L.LightningModule,ModelMixin):
 
         self.regressor.add_module(
                                   RegressionModelConstants.OUTPUT_LAYER_NAME,
-                                  nn.Linear(64, len(Features.getNoduleFeaturesVector()))
+                                  nn.Linear(64, len(TAGRET_FEATURES))
                                   ) 
 
     def forward(self, x):

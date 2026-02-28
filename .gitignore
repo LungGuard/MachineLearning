@@ -23,6 +23,7 @@ ClassificationModel/datasets/
 DetectionModel/datasets/
 DetectionModel/datasets_monai/
 DetectionModel/datasets*
+DetectionModel/src/model_checkpoints/
 
 # Training artifacts (keep directory structure)
 logs/*
@@ -35,3 +36,4 @@ checkpoints/*
 
 *.keras
 data_preparation.log
+

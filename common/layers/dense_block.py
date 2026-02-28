@@ -4,7 +4,10 @@ import torch.nn.functional as F
 
 
 class DenseBlock(nn.Module):
-    def __init__(self, in_features, out_features, activation=nn.ReLU()):
+    def __init__(self, 
+                 in_features, 
+                 out_features, 
+                 activation=nn.ReLU()):
         super(DenseBlock, self).__init__()
 
         self.fc = nn.Linear(

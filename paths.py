@@ -16,7 +16,6 @@ Usage:
 
 from pathlib import Path
 
-# Resolved once — works on macOS, Windows, and Linux
 PROJECT_ROOT = Path(__file__).resolve().parent
 
 
@@ -39,6 +38,6 @@ class ProjectPaths:
     CLASSIFICATION_DATASETS_DIR = CLASSIFICATION_ROOT / "datasets"
     CLASSIFICATION_FIGSHARE_DIR = CLASSIFICATION_DATASETS_DIR / "figshare_dataset"
     CLASSIFICATION_HUGGINGFACE_CACHE = CLASSIFICATION_DATASETS_DIR / "hugging_face_dataset"
-    CLASSIFICATION_UNIFIED_DIR = CLASSIFICATION_DATASETS_DIR / "unified_dataset"
+    CLASSIFICATION_UNIFIED_DIR = CLASSIFICATION_DATASETS_DIR / "unified_dataset_v2"
     CLASSIFICATION_CHECKPOINT_DIR = CLASSIFICATION_ROOT / "testing" / "Checkpoints"
     CLASSIFICATION_RESULTS_DIR = CLASSIFICATION_ROOT / "testing" / "results"

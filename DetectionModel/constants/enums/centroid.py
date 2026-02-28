@@ -2,6 +2,6 @@ from enum import StrEnum
 
 
 class CENTROID(StrEnum):
-    CENTROID_Z = 'centroid_z'
-    CENTROID_Y = 'centroid_y'
-    CENTROID_X = 'centroid_x'
+    Z = 'centroid_z'
+    Y = 'centroid_y'
+    X = 'centroid_x'

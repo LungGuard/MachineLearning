@@ -28,6 +28,8 @@ class NotificationFields(StrEnum):
 
 
 class NotificationHeaders(StrEnum):
-    PRIORITY_HEADER = "Priority"
-    TITLE_HEADER = "Title"
-    TAGS_HEADER = "Tags"
+    PRIORITY = "Priority"
+    TITLE = "Title"
+    TAGS = "Tags"
+
+BASE_URL = "https://ntfy.sh"

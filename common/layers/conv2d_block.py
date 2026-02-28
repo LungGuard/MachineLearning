@@ -4,7 +4,13 @@ import torch.nn.functional as F
 
 
 class Conv2DBlock(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size=3, pool_kernel_size=2, pool_stride=2, activation='relu'):
+    def __init__(self,
+                  in_channels,
+                  out_channels, 
+                  kernel_size=3,
+                  pool_kernel_size=2,
+                  pool_stride=2, 
+                  activation='relu'):
         super(Conv2DBlock, self).__init__()
 
         padding = kernel_size // 2

@@ -1,20 +1,23 @@
-# notification_service.py
 
 import requests
 from datetime import datetime
+from enum import StrEnum
 from common.constants.notification import (
     NotificationPriority,
     NotificationTags,
     NotificationFields,
-    NotificationHeaders
+    NotificationHeaders,
+    BASE_URL
 )
+from .constants import StatusCode
 
 
 class NtfyNotificationService:
     def __init__(self,
                  model_name,
                  topic_name: str = NotificationFields.TOPIC_NAME,
-                 base_url: str = "https://ntfy.sh"):
+                 base_url: str = BASE_URL):
+        
         self.model_name = model_name
         self.topic_name = topic_name
         self.base_url = base_url
@@ -24,11 +27,13 @@ class NtfyNotificationService:
     def format_metrics_msg(metrics):
         return "\n".join(f"{metric}: {value:.4f}" for metric, value in sorted(metrics.items()))
 
-    def send_message(self, msg, title=None, priority=NotificationPriority.DEFAULT, tags=None):
+    def send_message(self, msg, title=None,
+                      priority=NotificationPriority.DEFAULT,
+                      tags: StrEnum = None):
         headers = {
-            NotificationHeaders.PRIORITY_HEADER: priority,
-            NotificationHeaders.TITLE_HEADER: title or NotificationFields.DEFAULT_TITLE,
-            NotificationHeaders.TAGS_HEADER: ",".join(tags) if tags else "",
+            NotificationHeaders.PRIORITY: priority,
+            NotificationHeaders.TITLE: title or NotificationFields.DEFAULT_TITLE,
+            NotificationHeaders.TAGS: ",".join(tags) if tags else "",
         }
         response = requests.post(
             self.url,
@@ -36,7 +41,7 @@ class NtfyNotificationService:
             headers=headers
         )
 
-        return response.status_code == 200
+        return response.status_code == StatusCode.OK
 
     def send_training_start_message(self, total_epochs=None):
         epoch_info = f"\nTotal Epochs: {total_epochs}" if total_epochs else ""
