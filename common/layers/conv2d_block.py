@@ -10,7 +10,7 @@ class Conv2DBlock(nn.Module):
                   kernel_size=3,
                   pool_kernel_size=2,
                   pool_stride=2, 
-                  activation='relu'):
+                  activation=Activation.RELU):
         super(Conv2DBlock, self).__init__()
 
         padding = kernel_size // 2
@@ -26,10 +26,12 @@ class Conv2DBlock(nn.Module):
         self.bn = nn.BatchNorm2d(out_channels)
         self.pool = nn.MaxPool2d(kernel_size=pool_kernel_size, stride=pool_stride)
 
-        if activation == 'relu':
+        if activation == Activation.RELU:
             self.act = nn.ReLU(inplace=True)
-        elif activation == 'leaky_relu':
+
+        elif activation == Activation.LEAKY_RELU:
             self.act = nn.LeakyReLU(inplace=True)
+        
         else:
             self.act = nn.Identity()
 

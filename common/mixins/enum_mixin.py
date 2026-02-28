@@ -1,7 +1,7 @@
-from enum import StrEnum,Enum
+from enum import Enum
 
 
-class EnumMixin(Enum):
+class EnumMixin:
     def get_variant(self, variant):
         variant_prefix = variant.value if isinstance(variant, Enum) else variant
         return f"{variant_prefix}{self.value}" if "_" in variant_prefix else f"{variant_prefix}_{self.value}"
