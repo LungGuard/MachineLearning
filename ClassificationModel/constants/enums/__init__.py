@@ -1,1 +1,2 @@
 from ClassificationModel.constants.enums.huggingface import HuggingFaceDataSetFields
+from .cancer_type import CancerType

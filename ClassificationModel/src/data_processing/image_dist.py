@@ -14,7 +14,7 @@ class DatasetCalculator:
         self.dataset_dir = Path(dataset_dir)
     
     def count_images_in_split(self, split_name):
-        split_dir = self.dataset_dir / split_name
+        split_dir : Path = self.dataset_dir / split_name
         if not split_dir.exists():
             return {}
         

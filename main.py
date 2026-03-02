@@ -1,6 +1,8 @@
-def main():
-    print("Hello from machinelearning!")
+from fastapi import FastAPI
 
 
-if __name__ == "__main__":
-    main()
+app = FastAPI() 
+
+@app.post("/api/analyze")
+def analyze():
+    pass

@@ -1,9 +1,8 @@
-from dataclasses import dataclass, asdict
+from pydantic import BaseModel
 import torch
 
 
-@dataclass(frozen=True)
-class NoduleFeatures:
+class NoduleFeatures(BaseModel):
     malignancy: float
     spiculation: float
     lobulation: float
@@ -13,8 +12,6 @@ class NoduleFeatures:
     texture: float
     calcification: float
 
-    def to_dict(self):
-        return asdict(self)
 
     @classmethod
     def from_tensor(cls, tensor: torch.Tensor):
