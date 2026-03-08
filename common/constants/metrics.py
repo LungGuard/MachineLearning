@@ -7,7 +7,6 @@ class Metrics(StrEnum,EnumMixin):
     PRECISION = 'precision'
     RECALL = 'recall'
     AUC = 'auc'
-    DEFAULT_LOSS = 'loss'
     R2 = 'r2'
     RMSE = 'rmse'
     MAE = "mae"

@@ -976,6 +976,15 @@ wheels = [
 ]
 
 [[package]]
+name = "ifaddr"
+version = "0.2.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/e8/ac/fb4c578f4a3256561548cd825646680edcadb9440f3f68add95ade1eb791/ifaddr-0.2.0.tar.gz", hash = "sha256:cc0cbfcaabf765d44595825fb96a99bb12c79716b73b44330ea38ee2b0c4aed4", size = 10485, upload-time = "2022-06-15T21:40:27.561Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/9c/1f/19ebc343cc71a7ffa78f17018535adc5cbdd87afb31d7c34874680148b32/ifaddr-0.2.0-py3-none-any.whl", hash = "sha256:085e0305cfe6f16ab12d72e2024030f5d52674afad6911bb1eee207177b8a748", size = 12314, upload-time = "2022-06-15T21:40:25.756Z" },
+]
+
+[[package]]
 name = "imageio"
 version = "2.37.2"
 source = { registry = "https://pypi.org/simple" }
@@ -1320,6 +1329,7 @@ dependencies = [
     { name = "opencv-python" },
     { name = "pandas" },
     { name = "pillow" },
+    { name = "py-eureka-client" },
     { name = "pydicom" },
     { name = "pylidc" },
     { name = "rich" },
@@ -1352,6 +1362,7 @@ requires-dist = [
     { name = "opencv-python", specifier = ">=4.11.0.86" },
     { name = "pandas", specifier = ">=2.3.3" },
     { name = "pillow", specifier = ">=12.0.0" },
+    { name = "py-eureka-client", specifier = ">=0.13.3" },
     { name = "pydicom", specifier = ">=3.0.1" },
     { name = "pylidc", specifier = ">=0.2.3" },
     { name = "rich", specifier = ">=14.2.0" },
@@ -2296,6 +2307,20 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/cd/05/0a34433a064256a578f1783a10da6df098ceaa4a57bbeaa96a6c0352786b/pure_eval-0.2.3.tar.gz", hash = "sha256:5f4e983f40564c576c7c8635ae88db5956bb2229d7e9237d03b3c0b0190eaf42", size = 19752, upload-time = "2024-07-21T12:58:21.801Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/8e/37/efad0257dc6e593a18957422533ff0f87ede7c9c6ea010a2177d738fb82f/pure_eval-0.2.3-py3-none-any.whl", hash = "sha256:1db8e35b67b3d218d818ae653e27f06c3aa420901fa7b081ca98cbedc874e0d0", size = 11842, upload-time = "2024-07-21T12:58:20.04Z" },
+]
+
+[[package]]
+name = "py-eureka-client"
+version = "0.13.3"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "dnspython" },
+    { name = "httpx" },
+    { name = "ifaddr" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/c9/1c/d37ec57a4ff68f179f8d30e4642f6aaeca730f38169333f8399403e38525/py_eureka_client-0.13.3.tar.gz", hash = "sha256:f6e55bfc898adb50412fb701861ca86be363f84b632ddd31a104b2ca170c0676", size = 32219, upload-time = "2026-01-21T06:15:04.705Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/bf/c8/1716cde4c97dadc4f456329c29453d0510bdb586b9e3011a8a8fcc71e092/py_eureka_client-0.13.3-py3-none-any.whl", hash = "sha256:ccfcdad3c6458c6ad4a15f2db3561389d018fcdeeb220ef3abfa60008d54c6bc", size = 33580, upload-time = "2026-01-21T06:15:03.217Z" },
 ]
 
 [[package]]

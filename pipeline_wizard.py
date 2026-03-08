@@ -72,7 +72,7 @@ logger = logging.getLogger(__name__)
 # ══════════════════════════════════════════════════════════
 
 _DEFAULT_DATA_PATH = r"E:\FinalsProject\Datasets\CancerDetection\images\manifest-1600709154662\LIDC-IDRI"
-_DEFAULT_OUTPUT_DIR = r".\DetectionModel\datasets_monai"
+_DEFAULT_OUTPUT_DIR = r".\DetectionModel\datasets"
 
 
 def _ask_mode() -> PipelineMode:

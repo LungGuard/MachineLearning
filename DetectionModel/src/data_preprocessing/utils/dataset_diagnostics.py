@@ -17,6 +17,8 @@ from rich.text import Text
 from rich.prompt import Prompt, Confirm
 from rich import box
 
+from common.constants.emums import Color, Decoration
+
 console = Console()
 
 logging.basicConfig(level=logging.WARNING, format='%(asctime)s - %(message)s')
@@ -248,7 +250,7 @@ class DiagnoserDisplay:
             first_type = problem_type.split(";")[0].strip()
             icon, _ = cls.PROBLEM_STYLES.get(first_type, ("⚠️", "yellow"))
             bar_len = int((count / max_count) * 20)
-            bar = f"[red]{'█' * bar_len}[/red][dim]{'░' * (20 - bar_len)}[/dim]"
+            bar = f"{Color.RED('█' * bar_len)}{Decoration.DIM('░' * (20 - bar_len))}"
             table.add_row(icon, problem_type, str(count), bar)
 
         console.print(table)
@@ -316,8 +318,8 @@ class DiagnoserDisplay:
     def print_export_result(mode: str, count: int, path: str) -> None:
         icon = "🗑️" if mode == "delete" else "📦"
         verb = "Deleted" if mode == "delete" else "Copied"
-        console.print(f"\n  {icon} {verb} [bold]{count:,}[/bold] files", style="green")
-        console.print(f"  📁 Location: [cyan]{path}[/cyan]\n") if mode != "delete" else console.print()
+        console.print(f"\n  {icon} {verb} {Decoration.BOLD(f'{count:,}')} files", style=Color.GREEN)
+        console.print(f"  📁 Location: {Color.CYAN(path)}\n") if mode != "delete" else console.print()
 
     @staticmethod
     def _compute_health_grade(ratio: float) -> str:
@@ -372,8 +374,8 @@ class DatasetDiagnoser:
             all_images.extend([(fp, split) for fp in images])
 
         total = len(all_images)
-        console.print(f"  📁 Dataset: [cyan]{self.dataset_dir}[/cyan]")
-        console.print(f"  🖼️  Found [bold]{total:,}[/bold] images across [bold]{len(work_items)}[/bold] split(s)\n")
+        console.print(f"  📁 Dataset: {Color.CYAN(self.dataset_dir)}")
+        console.print(f"  🖼️  Found {Decoration.BOLD(f'{total:,}')} images across {Decoration.BOLD(len(work_items))} split(s)\n")
 
         self._analyze_with_progress(all_images) if show_progress else self._analyze_silent(all_images)
 
@@ -397,7 +399,7 @@ class DatasetDiagnoser:
         """Display rich summary in terminal."""
         summary = self.get_summary_report()
         df = self.get_results_dataframe()
-        self.display.print_summary(summary, df) if "error" not in summary else console.print("[red]No data to display.[/red]")
+        self.display.print_summary(summary, df) if "error" not in summary else console.print(Color.RED("No data to display."))
 
     def save_reports_to_disk(self, output_dir: str = None) -> None:
         save_path = Path(output_dir) if output_dir else self.dataset_dir / "analysis"
@@ -405,10 +407,10 @@ class DatasetDiagnoser:
 
         df = self.get_results_dataframe()
         if df.empty:
-            console.print("[yellow]⚠️  No results to save.[/yellow]")
+            console.print(Color.YELLOW("⚠️  No results to save."))
             return
 
-        with console.status("[cyan]Saving reports...[/cyan]", spinner="dots"):
+        with console.status(Color.CYAN("Saving reports..."), spinner="dots"):
             df.to_csv(save_path / "image_analysis_full.csv", index=False)
             self.get_problematic_images().to_csv(save_path / "problematic_images.csv", index=False)
             self._save_nodule_analysis(df, save_path)
@@ -419,21 +421,21 @@ class DatasetDiagnoser:
                 for k, v in summary.items():
                     f.write(f"{k}: {v}\n")
 
-        console.print(f"  💾 Reports saved to: [cyan]{save_path}[/cyan]\n")
+        console.print(f"  💾 Reports saved to: {Color.CYAN(save_path)}\n")
 
     def export_clean_dataset(self, output_dir: Optional[str] = None, overwrite_existing: bool = False) -> None:
         if not self.results:
-            console.print("[yellow]⚠️  No analysis results. Run analyze() first.[/yellow]")
+            console.print(Color.YELLOW("⚠️  No analysis results. Run analyze() first."))
             return
 
         if not overwrite_existing and not output_dir:
-            console.print("[red]Must provide output_dir or set overwrite_existing=True.[/red]")
+            console.print(Color.RED("Must provide output_dir or set overwrite_existing=True."))
             return
 
         bad_nodule_keys = self._get_bad_nodule_keys()
-        console.print(f"  🔍 Found [bold red]{len(bad_nodule_keys)}[/bold red] problematic nodules to remove\n")
+        console.print(f"  🔍 Found {Color.RED(len(bad_nodule_keys), Decoration.BOLD)} problematic nodules to remove\n")
 
-        with console.status("[cyan]Processing files...[/cyan]", spinner="dots"):
+        with console.status(Color.CYAN("Processing files..."), spinner="dots"):
             operations_count = self._process_files(output_dir, overwrite_existing, bad_nodule_keys)
             self._update_metadata_csv(output_dir, overwrite_existing, bad_nodule_keys)
 
@@ -442,7 +444,7 @@ class DatasetDiagnoser:
         self.display.print_export_result(mode, operations_count, target)
 
     def verify_clean_dataset(self, clean_dir: str) -> Dict:
-        console.print(f"\n  🔎 Verifying: [cyan]{clean_dir}[/cyan]\n")
+        console.print(f"\n  🔎 Verifying: {Color.CYAN(clean_dir)}\n")
 
         verifier = DatasetDiagnoser(clean_dir, self.thresholds)
         verifier.analyze(show_progress=True)
@@ -826,8 +828,8 @@ class DatasetDiagnoser:
 
 def edit_thresholds_interactive(thresholds: AnalysisThresholds) -> AnalysisThresholds:
     """Interactive threshold editor."""
-    console.print("\n  [bold cyan]Threshold Editor[/bold cyan]")
-    console.print("  [dim]Select parameters to modify (or press Enter to skip)[/dim]\n")
+    console.print(f"\n  {Decoration.BOLD_CYAN('Threshold Editor')}")
+    console.print(f"  {Decoration.DIM('Select parameters to modify (or press Enter to skip)')}\n")
     
     # Define threshold groups with their fields
     threshold_options = {
@@ -867,7 +869,7 @@ def edit_thresholds_interactive(thresholds: AnalysisThresholds) -> AnalysisThres
     ).strip().lower()
     
     if selection == "none" or not selection:
-        console.print("  [dim]No changes made[/dim]\n")
+        console.print(f"  {Decoration.DIM('No changes made')}\n")
         return thresholds
     
     # Parse selection
@@ -877,7 +879,7 @@ def edit_thresholds_interactive(thresholds: AnalysisThresholds) -> AnalysisThres
         to_edit = [s.strip() for s in selection.split(",") if s.strip() in threshold_options]
     
     if not to_edit:
-        console.print("  [yellow]No valid selections[/yellow]\n")
+        console.print(f"  {Color.YELLOW('No valid selections')}\n")
         return thresholds
     
     console.print()
@@ -889,24 +891,24 @@ def edit_thresholds_interactive(thresholds: AnalysisThresholds) -> AnalysisThres
         
         if val_type == tuple:
             # Special handling for lung_intensity_range
-            prompt_text = f"  {desc} [dim](current: {current_val})[/dim]"
+            prompt_text = f"  {desc} {Decoration.DIM(f'(current: {current_val})')}"
             new_val_str = Prompt.ask(prompt_text, default=f"{current_val[0]},{current_val[1]}")
             try:
                 parts = new_val_str.split(",")
                 new_val = (int(parts[0].strip()), int(parts[1].strip()))
                 setattr(thresholds, field, new_val)
-                console.print(f"    ✓ Updated to {new_val}", style="green")
+                console.print(f"    ✓ Updated to {new_val}", style=Color.GREEN)
             except (ValueError, IndexError):
-                console.print(f"    ✗ Invalid format, keeping {current_val}", style="red")
+                console.print(f"    ✗ Invalid format, keeping {current_val}", style=Color.RED)
         else:
-            prompt_text = f"  {desc} [dim](current: {current_val})[/dim]"
+            prompt_text = f"  {desc} {Decoration.DIM(f'(current: {current_val})')}"
             new_val_str = Prompt.ask(prompt_text, default=str(current_val))
             try:
                 new_val = val_type(new_val_str)
                 setattr(thresholds, field, new_val)
-                console.print(f"    ✓ Updated to {new_val}", style="green")
+                console.print(f"    ✓ Updated to {new_val}", style=Color.GREEN)
             except ValueError:
-                console.print(f"    ✗ Invalid value, keeping {current_val}", style="red")
+                console.print(f"    ✗ Invalid value, keeping {current_val}", style=Color.RED)
     
     console.print()
     return thresholds
@@ -921,7 +923,7 @@ def run_interactive() -> None:
     dataset = Path(dataset_path)
 
     if not dataset.exists():
-        console.print(f"\n  [bold red]❌ Path does not exist:[/bold red] {dataset_path}")
+        console.print(f"\n  {Decoration.BOLD_RED(f'❌ Path does not exist:')} {dataset_path}")
         return
 
     console.print()
@@ -936,21 +938,21 @@ def run_interactive() -> None:
     if modify:
         thresholds = edit_thresholds_interactive(thresholds)
         diagnoser = DatasetDiagnoser(dataset_path, thresholds)
-        console.print("  [bold green]✓[/bold green] Updated thresholds:\n")
+        console.print(f"  {Color.GREEN('✓', Decoration.BOLD)} Updated thresholds:\n")
         diagnoser.display.print_thresholds(thresholds)
 
     # Step 3: Analyze
-    console.rule("[bold cyan]Phase 1: Analysis[/bold cyan]", style="cyan")
+    console.rule(Decoration.BOLD_CYAN("Phase 1: Analysis"), style=Color.CYAN)
     console.print()
 
     start = time.time()
     diagnoser.analyze()
     elapsed = time.time() - start
 
-    console.print(f"  ⏱️  Analysis completed in [bold]{elapsed:.1f}s[/bold]\n")
+    console.print(f"  ⏱️  Analysis completed in {Decoration.BOLD(f'{elapsed:.1f}s')}\n")
 
     # Step 4: Display summary
-    console.rule("[bold cyan]Results[/bold cyan]", style="cyan")
+    console.rule(Decoration.BOLD_CYAN("Results"), style=Color.CYAN)
     console.print()
     diagnoser.print_summary()
 
@@ -967,18 +969,18 @@ def run_interactive() -> None:
     prob_count = summary.get("problematic_count", 0)
 
     if prob_count == 0:
-        console.print("\n  [bold green]✨ Dataset is already clean — no action needed![/bold green]\n")
+        console.print(f"\n  {Decoration.BOLD_GREEN('✨ Dataset is already clean — no action needed!')}\n")
         return
 
     console.print()
-    console.rule("[bold yellow]Phase 2: Cleaning[/bold yellow]", style="yellow")
+    console.rule(Decoration.BOLD_YELLOW("Phase 2: Cleaning"), style=Color.YELLOW)
     console.print()
-    console.print(f"  Found [bold red]{prob_count}[/bold red] problematic images.")
+    console.print(f"  Found {Color.RED(prob_count, Decoration.BOLD)} problematic images.")
     console.print()
 
     clean = Confirm.ask("  🧹 Would you like to create a clean dataset?", default=True)
     if not clean:
-        console.print("\n  [dim]Skipping cleaning. You can re-run anytime.[/dim]\n")
+        console.print(f"\n  {Decoration.DIM('Skipping cleaning. You can re-run anytime.')}\n")
         return
 
     console.print()
@@ -992,10 +994,10 @@ def run_interactive() -> None:
     overwrite = mode_choice == "overwrite"
 
     if overwrite:
-        console.print("\n  [bold red]⚠️  WARNING: This will permanently delete files from the original dataset![/bold red]")
+        console.print(f"\n  {Decoration.BOLD_RED('⚠️  WARNING: This will permanently delete files from the original dataset!')}")
         confirmed = Confirm.ask("     Are you sure?", default=False)
         if not confirmed:
-            console.print("\n  [dim]Cancelled.[/dim]\n")
+            console.print(f"\n  {Decoration.DIM('Cancelled.')}\n")
             return
     else:
         default_clean = str(dataset.parent / (dataset.name + "_clean"))
@@ -1005,18 +1007,18 @@ def run_interactive() -> None:
     diagnoser.export_clean_dataset(output_dir=output_dir, overwrite_existing=overwrite)
 
     # Step 7: Verify
-    console.rule("[bold green]Phase 3: Verification[/bold green]", style="green")
+    console.rule(Decoration.BOLD_GREEN("Phase 3: Verification"), style=Color.GREEN)
 
     verify_path = output_dir if output_dir else str(dataset)
-    do_verify = Confirm.ask(f"\n  🔎 Verify the cleaned dataset at [cyan]{verify_path}[/cyan]?", default=True)
+    do_verify = Confirm.ask(f"\n  🔎 Verify the cleaned dataset at {Color.CYAN(verify_path)}?", default=True)
 
     if do_verify:
         diagnoser.verify_clean_dataset(verify_path)
 
     console.print()
     console.print(Panel(
-        "  [bold green]Done![/bold green] Your dataset is ready for training. 🚀  ",
-        border_style="green", box=box.DOUBLE
+        f"  {Decoration.BOLD_GREEN('Done!')} Your dataset is ready for training. 🚀  ",
+        border_style=Color.GREEN, box=box.DOUBLE
     ))
     console.print()
 

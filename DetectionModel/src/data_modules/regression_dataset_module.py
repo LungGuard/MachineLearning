@@ -7,7 +7,7 @@ from pathlib import Path
 from PIL import Image
 from torchvision import transforms
 import logging
-from sklearn.preprocessing import StandardScaler # Changed to StandardScaler
+from sklearn.preprocessing import StandardScaler
 
 from DetectionModel.constants.enums.features import Features
 from DetectionModel.constants.enums.bbox import BBOX
