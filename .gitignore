@@ -37,5 +37,6 @@ checkpoints/*
 *.keras
 data_preparation.log
 
+.env
 *.env
 .env
