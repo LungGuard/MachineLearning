@@ -38,3 +38,4 @@ checkpoints/*
 data_preparation.log
 
 *.env
+.env
