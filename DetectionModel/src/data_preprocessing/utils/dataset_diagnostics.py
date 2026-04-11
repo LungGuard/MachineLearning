@@ -18,6 +18,7 @@ from rich.prompt import Prompt, Confirm
 from rich import box
 
 from common.constants.emums import Color, Decoration
+from ..preprocessing.lung_morphology import compute_lung_body_metrics
 
 console = Console()
 
@@ -366,7 +367,7 @@ class DatasetDiagnoser:
             found_any = found_any or image_dir.exists()
             work_items.append((image_dir, split)) if image_dir.exists() else None
 
-        work_items.append((self.dataset_dir, "root")) if not found_any else None
+        None if found_any else work_items.append((self.dataset_dir, "root"))
 
         all_images: List[Tuple[Path, str]] = []
         for directory, split in work_items:
@@ -382,18 +383,16 @@ class DatasetDiagnoser:
     def get_results_dataframe(self) -> pd.DataFrame:
         cache_key = 'full'
         cached = self._cached_dfs.get(cache_key)
-        result = cached if cached is not None else self._build_results_df(cache_key)
-        return result
+        return cached if cached is not None else self._build_results_df(cache_key)
 
     def get_problematic_images(self) -> pd.DataFrame:
         df = self.get_results_dataframe()
-        return df[df['is_problematic']].copy() if not df.empty else df
+        return df if df.empty else df[df['is_problematic']].copy()
 
     def get_summary_report(self) -> Dict:
         df = self.get_results_dataframe()
         empty_result = {"error": "No data analyzed"}
-        result = self._build_summary(df) if not df.empty else empty_result
-        return result
+        return empty_result if df.empty else self._build_summary(df)
 
     def print_summary(self) -> None:
         """Display rich summary in terminal."""
@@ -562,30 +561,19 @@ class DatasetDiagnoser:
 
     def _compute_lung_metrics(self, gray: np.ndarray) -> Dict:
         t = self.thresholds
-        total = gray.size
-
-        body_mask = (gray > t.body_intensity_floor).astype(np.uint8) * 255
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (t.morph_kernel_size, t.morph_kernel_size))
-        body_mask = cv2.morphologyEx(body_mask, cv2.MORPH_CLOSE, kernel)
-        body_mask = cv2.morphologyEx(body_mask, cv2.MORPH_OPEN, kernel)
-
-        body_area = int(np.sum(body_mask > 0))
-        body_ratio = body_area / total
-
         lo, hi = t.lung_intensity_range
-        lung_candidate = ((gray >= lo) & (gray < hi)).astype(np.uint8) * 255
-        lung_in_body = cv2.bitwise_and(lung_candidate, body_mask)
-
-        lung_area = int(np.sum(lung_in_body > 0))
-        lung_body_ratio = lung_area / body_area if body_area > 0 else 0.0
-
-        contours, _ = cv2.findContours(lung_in_body, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        significant = list(filter(lambda c: cv2.contourArea(c) > t.min_lung_contour_area, contours))
-
+        metrics = compute_lung_body_metrics(
+            gray,
+            body_intensity_floor=t.body_intensity_floor,
+            lung_intensity_low=lo,
+            lung_intensity_high=hi,
+            morph_kernel_size=t.morph_kernel_size,
+            min_contour_area=t.min_lung_contour_area,
+        )
         return {
-            "body_ratio": body_ratio,
-            "lung_body_ratio": lung_body_ratio,
-            "lung_region_count": len(significant),
+            "body_ratio": metrics["body_ratio"],
+            "lung_body_ratio": metrics["lung_body_ratio"],
+            "lung_region_count": metrics["lung_region_count"],
         }
 
     def _compute_geometry_metrics(self, gray: np.ndarray) -> Dict:
@@ -737,7 +725,7 @@ class DatasetDiagnoser:
                 "total_nodules": len(counts),
                 "nodules_with_3_slices": int((counts['slice_count'] == 3).sum()),
                 "nodules_with_wrong_count": len(non_three),
-                "wrong_count_details": non_three.to_dict('records') if not non_three.empty else [],
+                "wrong_count_details": [] if non_three.empty else non_three.to_dict('records'),
             }
 
         return result
@@ -932,7 +920,7 @@ def run_interactive() -> None:
     thresholds = AnalysisThresholds()
     diagnoser = DatasetDiagnoser(dataset_path, thresholds)
     diagnoser.display.print_thresholds(diagnoser.thresholds)
-    
+
     # Step 2.5: Ask if user wants to modify thresholds
     modify = Confirm.ask("  ✏️  Would you like to modify any thresholds?", default=False)
     if modify:
@@ -1000,7 +988,7 @@ def run_interactive() -> None:
             console.print(f"\n  {Decoration.DIM('Cancelled.')}\n")
             return
     else:
-        default_clean = str(dataset.parent / (dataset.name + "_clean"))
+        default_clean = str(dataset.parent / f"{dataset.name}_clean")
         output_dir = Prompt.ask("     Output directory for clean dataset", default=default_clean).strip()
 
     console.print()
@@ -1009,10 +997,11 @@ def run_interactive() -> None:
     # Step 7: Verify
     console.rule(Decoration.BOLD_GREEN("Phase 3: Verification"), style=Color.GREEN)
 
-    verify_path = output_dir if output_dir else str(dataset)
-    do_verify = Confirm.ask(f"\n  🔎 Verify the cleaned dataset at {Color.CYAN(verify_path)}?", default=True)
-
-    if do_verify:
+    verify_path = output_dir or str(dataset)
+    if do_verify := Confirm.ask(
+        f"\n  🔎 Verify the cleaned dataset at {Color.CYAN(verify_path)}?",
+        default=True,
+    ):
         diagnoser.verify_clean_dataset(verify_path)
 
     console.print()

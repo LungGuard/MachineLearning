@@ -15,6 +15,8 @@ from typing import Tuple, Optional
 import cv2
 import numpy as np
 
+from .lung_morphology import compute_lung_body_metrics
+
 logger = logging.getLogger(__name__)
 
 
@@ -91,24 +93,16 @@ class SliceQualityGate:
         return passed, reason
 
     def _compute_lung_ratio(self, gray: np.ndarray) -> float:
-        """Lung-to-body area ratio (same algorithm as diagnoser)."""
+        """Lung-to-body area ratio (delegates to shared morphology helper)."""
         c = self.config
-        body_mask = (gray > c.body_intensity_floor).astype(np.uint8) * 255
-        kernel = cv2.getStructuringElement(
-            cv2.MORPH_ELLIPSE, (c.morph_kernel_size, c.morph_kernel_size)
+        metrics = compute_lung_body_metrics(
+            gray,
+            body_intensity_floor=c.body_intensity_floor,
+            lung_intensity_low=c.lung_intensity_low,
+            lung_intensity_high=c.lung_intensity_high,
+            morph_kernel_size=c.morph_kernel_size,
         )
-        body_mask = cv2.morphologyEx(body_mask, cv2.MORPH_CLOSE, kernel)
-        body_mask = cv2.morphologyEx(body_mask, cv2.MORPH_OPEN, kernel)
-        body_area = int(np.sum(body_mask > 0))
-
-        lung_candidate = (
-            (gray >= c.lung_intensity_low) & (gray < c.lung_intensity_high)
-        ).astype(np.uint8) * 255
-        lung_in_body = cv2.bitwise_and(lung_candidate, body_mask)
-        lung_area = int(np.sum(lung_in_body > 0))
-
-        ratio = lung_area / body_area if body_area > 0 else 0.0
-        return ratio
+        return metrics["lung_body_ratio"]
 
     # ── CLAHE Enhancement ─────────────────────
 
