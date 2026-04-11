@@ -123,17 +123,27 @@ class DICOMScanSource:
     @staticmethod
     def _extract_spacing_from_meta(meta: dict) -> Optional[Tuple[float, float, float]]:
         try:
-            pixdim = meta.get('pixdim', None)
-            affine = meta.get('affine', None)
-            spacing = (
-                (float(pixdim[3]), float(pixdim[1]), float(pixdim[2]))
-                if pixdim is not None and len(pixdim) >= 4
-                else (
-                    tuple(map(lambda i: float(np.abs(affine[i, i])), (2, 0, 1)))
-                    if affine is not None
-                    else None
-                )
-            )
+            spacing = None
+            # Prefer MONAI's pre-computed spacing key (already in (x, y, z) order)
+            if 'spacing' in meta:
+                raw = meta['spacing']
+                candidate = tuple(float(s) for s in raw[:3])
+                if all(s > 0 for s in candidate):
+                    spacing = candidate
+            # Fall back to NIfTI pixdim: [qfac, x, y, z, ...]
+            if spacing is None:
+                pixdim = meta.get('pixdim', None)
+                if pixdim is not None and len(pixdim) >= 4:
+                    candidate = (float(pixdim[3]), float(pixdim[1]), float(pixdim[2]))
+                    if all(s > 0 for s in candidate):
+                        spacing = candidate
+            # Last resort: diagonal of affine matrix
+            if spacing is None:
+                affine = meta.get('affine', None)
+                if affine is not None:
+                    candidate = tuple(float(np.abs(affine[i, i])) for i in (2, 0, 1))
+                    if all(s > 0 for s in candidate):
+                        spacing = candidate
         except Exception as e:
             logger.error(f"Spacing extraction from DICOM meta failed: {e}")
             spacing = None

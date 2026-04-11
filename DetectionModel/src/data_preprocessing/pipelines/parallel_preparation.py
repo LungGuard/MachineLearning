@@ -102,7 +102,7 @@ def _init_worker(data_path: str) -> None:
 
 def _worker_process_scan(args: Tuple) -> List[Dict]:
     """Worker function — process a single scan, return metadata list."""
-    patient_id, patient_split, config_dict, directories_dict = args
+    patient_id, scan_id, patient_split, config_dict, directories_dict = args
     global _worker_pylidc
     pylidc = _worker_pylidc
 
@@ -111,11 +111,8 @@ def _worker_process_scan(args: Tuple) -> List[Dict]:
     directories = {k: Path(v) for k, v in directories_dict.items()}
 
     try:
-        scan = (
-            pylidc.query(pylidc.Scan)
-            .filter(pylidc.Scan.patient_id == patient_id)
-            .first()
-        )
+        # Query by primary key (O(1) index lookup) instead of filtering by patient_id string
+        scan = pylidc.query(pylidc.Scan).filter(pylidc.Scan.id == scan_id).first()
         if scan is not None:
             processor = CTScanProcessor(config, directories)
             source = PyLIDCScanSource(scan, NoduleAnnotationProcessor)
@@ -151,11 +148,14 @@ def run_parallel_pipeline(
     }
     directories_dict = {k: str(v) for k, v in pipeline.directories.items()}
 
+    # Pre-fetch scan IDs in main process so workers query by primary key (O(1) lookup)
+    # instead of filtering by patient_id string across each SQLite worker connection.
     task_args: List[Tuple] = []
     for scan, _ in pipeline.scans_to_process:
         pid = scan.patient_id
+        scan_id = scan.id
         split = get_patient_split(pid, pipeline.splits)
-        task_args.append((pid, split, config_dict, directories_dict))
+        task_args.append((pid, scan_id, split, config_dict, directories_dict))
 
     total = len(task_args)
     print_section_divider("Parallel Processing")
