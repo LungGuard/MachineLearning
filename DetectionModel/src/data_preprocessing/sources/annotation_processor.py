@@ -3,44 +3,46 @@ Nodule Annotation Processor Module
 Utilities for processing nodule annotations from radiologists.
 """
 
+import logging
 import numpy as np
 from typing import Tuple, Optional, List
 from DetectionModel.constants.enums.centroid import CENTROID
 from DetectionModel.constants.enums.features import Features, DEFAULT_FEATURES
-from ..core.coordinate_transformer import CoordinateTransformer
-from ..preprocessing.bbox_converter import BoundingBoxConverter
-import contextlib
+
+logger = logging.getLogger(__name__)
 
 
 class NoduleAnnotationProcessor:
     """Utilities for processing nodule annotations from radiologists."""
-    
+
     @staticmethod
     def _safe_extract_bbox(ann):
         """Safely extract bounding box from annotation."""
-        try:            
+        try:
             bbox = ann.bbox()
             return bbox
-        except Exception:
+        except (AttributeError, TypeError, ValueError) as e:
+            logger.warning(f"bbox extraction failed: {e}")
             return None
-    
+
     @staticmethod
     def _safe_extract_centroid(ann):
         """Safely extract centroid from annotation."""
         try:
             centroid = ann.centroid
             return centroid if centroid and len(centroid) == 3 else None
-        except Exception:
+        except (AttributeError, TypeError, ValueError) as e:
+            logger.warning(f"centroid extraction failed: {e}")
             return None
-    
+
     @staticmethod
     def _safe_extract_contour_slice_indices(ann):
         """Safely extract contour slice indices from annotation."""
-        try:        
+        try:
             return ann.contour_slice_indices
         except Exception:
             return None
-    
+
     @staticmethod
     def extract_nodule_features(
         annotations: list,
@@ -48,7 +50,7 @@ class NoduleAnnotationProcessor:
     ) -> dict:
         """
         Extract and aggregate features from multiple radiologist annotations.
-        
+
         LIDC-IDRI nodules have 1-4 independent radiologist annotations.
         This function computes consensus features using averaging.
         """
@@ -57,11 +59,11 @@ class NoduleAnnotationProcessor:
 
         def get_feature_value(feature_scores, feature_key):
             """Return the feature value if scores exist, otherwise return default."""
-            return (float(np.mean(feature_scores)) if feature_scores 
-                    else default_features[feature_key])    
-        
+            return (float(np.mean(feature_scores)) if feature_scores
+                    else default_features[feature_key])
+
         has_annotations = len(annotations) > 0
-        
+
         malignancy_scores = [ann.malignancy for ann in annotations] if has_annotations else []
         spiculation_scores = [ann.spiculation for ann in annotations] if has_annotations else []
         lobulation_scores = [ann.lobulation for ann in annotations] if has_annotations else []
@@ -71,56 +73,47 @@ class NoduleAnnotationProcessor:
         texture_scores = [ann.texture for ann in annotations] if has_annotations else []
         calcification_scores = [ann.calcification for ann in annotations] if has_annotations else []
         internal_structure_scores = [ann.internalStructure for ann in annotations] if has_annotations else []
-        
-        bboxs = filter(None, map(NoduleAnnotationProcessor._safe_extract_bbox, annotations))
-        diameters = list(map(BoundingBoxConverter.compute_diameter, bboxs))
-        
-        return  {
+        diameters = [float(ann.diameter) for ann in annotations if has_annotations]
+
+        return {
             Features.DIAMETER_MM: get_feature_value(
                 diameters, Features.DIAMETER_MM),
             Features.MALIGNANCY: get_feature_value(
-                malignancy_scores,Features.MALIGNANCY),
+                malignancy_scores, Features.MALIGNANCY),
             Features.SPICULATION: get_feature_value(
                 spiculation_scores, Features.SPICULATION),
             Features.LOBULATION: get_feature_value(
                 lobulation_scores, Features.LOBULATION),
             Features.SUBTLETY: get_feature_value(
-                subtlety_scores,Features.SUBTLETY),
+                subtlety_scores, Features.SUBTLETY),
             Features.SPHERICITY: get_feature_value(
                 sphericity_scores, Features.SPHERICITY),
             Features.MARGIN: get_feature_value(
                 margin_scores, Features.MARGIN),
             Features.TEXTURE: get_feature_value(
-                texture_scores,Features.TEXTURE),
+                texture_scores, Features.TEXTURE),
             Features.CALCIFICATION: get_feature_value(
                 calcification_scores, Features.CALCIFICATION),
-            Features.INTERNAL_STRUCTURE : get_feature_value(
-                internal_structure_scores,Features.INTERNAL_STRUCTURE),
+            Features.INTERNAL_STRUCTURE: get_feature_value(
+                internal_structure_scores, Features.INTERNAL_STRUCTURE),
             Features.ANNOTATION_COUNT: len(annotations)
         }
-        
-    
+
     @staticmethod
     def _get_valid_slice_indices_from_annotation(
-        ann, 
-        z_scale: float, 
+        ann,
+        z_scale: float,
         volume_depth: int
     ) -> List[int]:
         """Extract and transform valid slice indices from a single annotation."""
         try:
             original_indices = ann.contour_slice_indices
-            transformed_indices = map(
-                lambda idx: CoordinateTransformer.transform_slice_to_resampled_space(idx, z_scale),
-                original_indices
-            )
-            valid_indices = filter(
-                lambda idx: CoordinateTransformer.is_slice_within_volume(idx, volume_depth),
-                transformed_indices
-            )
-            return list(valid_indices)
+            transformed_indices = [int(round(idx * z_scale)) for idx in original_indices]
+            valid_indices = [idx for idx in transformed_indices if 0 <= idx < volume_depth]
+            return valid_indices
         except Exception:
             return []
-    
+
     @staticmethod
     def get_nodule_slice_indices(
         annotations: List,
@@ -145,7 +138,7 @@ class NoduleAnnotationProcessor:
         unique_indices = {idx for indices in all_valid_indices for idx in indices}
 
         return sorted(unique_indices)
-    
+
     @staticmethod
     def get_nodule_centroid(
         annotations: List,
@@ -157,10 +150,13 @@ class NoduleAnnotationProcessor:
         centroids = []
 
         for ann in annotations:
-            with contextlib.suppress(Exception):
+            try:
                 centroid = ann.centroid  # Returns (z, y, x) in original space
                 if centroid is not None and len(centroid) == 3:
                     centroids.append(centroid)
+            except (AttributeError, TypeError, ValueError) as e:
+                logger.warning(f"Annotation centroid extraction failed: {e}")
+
         if not centroids:
             return None
 
@@ -170,14 +166,16 @@ class NoduleAnnotationProcessor:
             for i in range(len(CENTROID))
         )
 
-        # Transform to resampled space if spacing provided
-        transformed_centroid = (
-            CoordinateTransformer.transform_coordinates_to_resampled(
-                avg_centroid, original_spacing, target_spacing
+        # Transform to resampled space if spacing provided (inline CoordinateTransformer math)
+        if original_spacing:
+            scale_factors = tuple(
+                orig / tgt for orig, tgt in zip(original_spacing, target_spacing)
             )
-            if original_spacing
-            else avg_centroid
-        )
+            transformed_centroid = tuple(
+                coord * scale for coord, scale in zip(avg_centroid, scale_factors)
+            )
+        else:
+            transformed_centroid = avg_centroid
 
         # Validate against resampled volume bounds
         z, y, x = transformed_centroid

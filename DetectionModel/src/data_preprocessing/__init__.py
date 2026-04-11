@@ -1,7 +1,7 @@
 """Data Preprocessing Package - Organized structure for CT scan data preparation.
 
 Package structure:
-    core/           - Data contracts (VolumeData, NoduleData, etc.), coordinate transforms, PyLIDC setup
+    core/           - Data contracts (VolumeData, NoduleData, etc.), PyLIDC setup
     sources/        - Data source adapters (PyLIDC, DICOM) and annotation processing
     preprocessing/  - Volume processing, slice processing (2.5D), quality gate, bbox conversion
     pipelines/      - Pipeline orchestration (serial, parallel, inference)
@@ -22,7 +22,6 @@ from .core import (
     NoduleCropResult,
     configure_pylidc,
     import_pylidc,
-    CoordinateTransformer,
 )
 
 # Source adapters + annotation processing
@@ -76,7 +75,6 @@ __all__ = [
     'NoduleCropResult',
     'configure_pylidc',
     'import_pylidc',
-    'CoordinateTransformer',
     # Sources
     'PyLIDCScanSource',
     'DICOMScanSource',
