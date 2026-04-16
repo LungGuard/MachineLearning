@@ -106,10 +106,11 @@ class VolumePreprocessingPipeline:
         """Handle NaNs, detect padding/offset, clip to valid HU range."""
         
         nan_count = np.isnan(volume).sum()
-        volume = np.nan_to_num(volume, nan=float(HUValues.AIR_HU)) if nan_count > 0 else volume
-        self.logger.warning(
-            f"[{patient_id}] Found {nan_count} NaN values, replacing with air HU"
-        ) if nan_count > 0 else None
+        if nan_count > 0:
+            volume = np.nan_to_num(volume, nan=float(HUValues.AIR_HU))
+            self.logger.warning(
+                f"[{patient_id}] Found {nan_count} NaN values, replacing with air HU"
+            )
 
         padding_mask = volume < HUValues.PADDING_THRESHOLD
         padding_count = padding_mask.sum()
@@ -131,6 +132,7 @@ class VolumePreprocessingPipeline:
             )
             volume[~padding_mask] -= float(HUValues.OFFSET_CORRECTION)
 
-        volume[padding_mask] = float(HUValues.AIR_HU) if padding_count > 0 else volume[padding_mask]
+        if padding_count > 0:
+            volume[padding_mask] = float(HUValues.AIR_HU)
         volume = np.clip(volume, float(HUValues.AIR_HU), float(HUValues.MAX_HU))
         return volume

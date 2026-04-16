@@ -57,9 +57,8 @@ class SliceQualityGate:
         enhanced = self._apply_clahe(image)
         passed, reason = self._check_quality(enhanced)
 
-        logger.debug(
-            f"[{patient_id}] {context} rejected: {reason}"
-        ) if not passed else None
+        if not passed:
+            logger.debug(f"[{patient_id}] {context} rejected: {reason}")
 
         result_image = enhanced if passed else None
         return result_image, passed, reason

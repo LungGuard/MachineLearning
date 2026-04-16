@@ -137,15 +137,13 @@ class CTScanProcessor:
 
             accepted: List[Dict] = []
             for slice_idx in candidates:
-                remaining = required - len(accepted)
-                metadata = (
-                    self._process_single_slice(
-                        slice_idx, nodule, volume, volume_shape, patient_id, split
-                    )
-                    if remaining > 0
-                    else None
+                if len(accepted) >= required:
+                    break
+                metadata = self._process_single_slice(
+                    slice_idx, nodule, volume, volume_shape, patient_id, split
                 )
-                accepted.append(metadata) if metadata is not None else None
+                if metadata is not None:
+                    accepted.append(metadata)
 
             return self._enforce_nodule_integrity(
                 accepted, required, patient_id, nodule.index
@@ -274,30 +272,23 @@ class CTScanProcessor:
             with contextlib.suppress(Exception):
                 img_path = Path(entry.get(DatasetConstants.IMAGE_PATH, ""))
                 lbl_path = Path(entry.get(DatasetConstants.LABEL_PATH, ""))
-                img_path.unlink() if img_path.exists() else None
-                lbl_path.unlink() if lbl_path.exists() else None
+                if img_path.exists():
+                    img_path.unlink()
+                if lbl_path.exists():
+                    lbl_path.unlink()
 
     @staticmethod
     def _select_candidate_slices(slice_indices: List[int], num_slices: int) -> List[int]:
         """Select up to 2× candidates, evenly distributed."""
         total = len(slice_indices)
         num_candidates = min(total, num_slices * 2)
-        return (
-            []
-            if total == 0
-            else (
-                slice_indices
-                if total <= num_candidates
-                else (
-                    [
-                        slice_indices[int(i * (total - 1) / (num_candidates - 1))]
-                        for i in range(num_candidates)
-                    ]
-                    if num_candidates > 1
-                    else [slice_indices[total // 2]]
-                )
-            )
-        )
+        if total == 0:
+            return []
+        if total <= num_candidates:
+            return slice_indices
+        if num_candidates == 1:
+            return [slice_indices[total // 2]]
+        return [slice_indices[i] for i in np.linspace(0, total - 1, num_candidates, dtype=int)]
 
     @staticmethod
     def _build_metadata(filename, patient_id, split, nodule: NoduleData,
