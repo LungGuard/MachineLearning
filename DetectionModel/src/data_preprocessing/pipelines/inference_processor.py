@@ -205,7 +205,6 @@ class InferencePipeline:
             if not valid_box:
                 return None
 
-            # Crop from both channels
             crop_25d = enhanced[y1:y2, x1:x2, :]
             crop_single = processed.middle_slice[y1:y2, x1:x2]
 

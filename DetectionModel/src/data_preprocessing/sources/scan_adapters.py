@@ -15,9 +15,6 @@ from ..core.scan_protocols import ScanSource, VolumeData, NoduleData
 logger = logging.getLogger(__name__)
 
 
-# ──────────────────────────────────────────────
-# Adapter 1: PyLIDC (Training / Data Preparation)
-# ──────────────────────────────────────────────
 
 class PyLIDCScanSource:
     """Wraps a pylidc.Scan object to satisfy the ScanSource protocol."""
@@ -84,9 +81,7 @@ class PyLIDCScanSource:
         return result
 
 
-# ──────────────────────────────────────────────
-# Adapter 2: Raw DICOM via MONAI (Inference)
-# ──────────────────────────────────────────────
+
 
 class DICOMScanSource:
     """Loads a CT scan from a DICOM directory using MONAI."""

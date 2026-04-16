@@ -31,7 +31,7 @@ from DetectionModel.constants.enums.features import Features
 
 from ..preprocessing.bbox_converter import BoundingBoxConverter
 
-from ..core.scan_protocols import ScanSource, VolumeData, NoduleData
+from ..core.scan_protocols import ScanSource, NoduleData
 from ..preprocessing.slice_quality_gate import SliceQualityGate, SliceQualityConfig
 from ..preprocessing.volume_processor import VolumePreprocessingPipeline
 from .inference_processor import InferencePipeline
@@ -76,9 +76,6 @@ class CTScanProcessor:
     def processing_stats(self) -> Dict:
         return dict(self._stats)
 
-    # ══════════════════════════════════════════
-    #  Shared — Volume Loading
-    # ══════════════════════════════════════════
 
     def prepare_volume_from_source(self, source: ScanSource):
         """Load + preprocess volume. Single entry point for both pipelines.
@@ -98,7 +95,7 @@ class CTScanProcessor:
     #  Data-Prep Pipeline — process + save to disk
     # ══════════════════════════════════════════
 
-    def process_scan(self, source: ScanSource, split: str, pl_module=None):
+    def process_scan(self, source: ScanSource, split: str, _pl_module=None):
         """Full data-preparation pipeline for one scan."""
         metadata_rows = []
         patient_id = source.patient_id
@@ -160,7 +157,7 @@ class CTScanProcessor:
             context = f"n{nodule.index:02d}_z{slice_idx:04d}"
 
             # ── Shared core (reuses inference pipeline's public method) ──
-            enhanced, crop_info, passed, reason = self.inference.prepare_slice_image(
+            enhanced, crop_info, passed, _ = self.inference.prepare_slice_image(
                 slice_idx, volume, patient_id, context
             )
 

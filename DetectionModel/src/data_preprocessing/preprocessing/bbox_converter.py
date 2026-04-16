@@ -14,15 +14,6 @@ class BoundingBoxConverter:
     """Utilities for converting bounding boxes to YOLO format."""
     
     @staticmethod
-    def compute_diameter(bbox) -> float:
-        """Compute nodule diameter from bounding box."""
-        # bbox is a tuple of slice objects: (slice(z1,z2), slice(y1,y2), slice(x1,x2))
-        x_extent = bbox[2].stop - bbox[2].start
-        y_extent = bbox[1].stop - bbox[1].start
-        diameter = np.sqrt(x_extent**2 + y_extent**2)
-        return float(diameter)
-    
-    @staticmethod
     def convert_to_yolo_format(
         volume_shape: Tuple[int, int, int],
         spacing: Tuple[float, float, float],
@@ -31,9 +22,9 @@ class BoundingBoxConverter:
         nodule_diameter: float
     ) -> Tuple[float, float, float, float]:
         """Convert nodule parameters to YOLO normalized format."""
-        depth, height, width = volume_shape
-        z_spacing, y_spacing, x_spacing = spacing
-        z_center, y_center, x_center = nodule_centroid
+        _, height, width = volume_shape
+        _, y_spacing, x_spacing = spacing
+        _, y_center, x_center = nodule_centroid
         
         # Convert diameter from mm to voxels (using x,y spacing for 2D bbox)
         diameter_voxels_x = (nodule_diameter / x_spacing) * padding_factor

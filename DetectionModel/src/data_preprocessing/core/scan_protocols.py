@@ -67,9 +67,6 @@ class NoduleCropResult:
     nodule_crop_25d: np.ndarray
 
 
-# ──────────────────────────────────────────────
-# Protocol
-# ──────────────────────────────────────────────
 
 @runtime_checkable
 class ScanSource(Protocol):

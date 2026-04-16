@@ -76,8 +76,7 @@ def configure_pylidc(dicom_path: str) -> bool:
 
     if not is_valid:
         logger.warning(
-            f"Directory validation failed - proceeding anyway. "
-            f"Ensure path contains LIDC-IDRI-* patient folders."
+            'Directory validation failed - proceeding anyway. Ensure path contains LIDC-IDRI-* patient folders.'
         )
 
 

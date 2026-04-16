@@ -151,7 +151,7 @@ class SlicePreprocessor:
             - RGB image as uint8 (H, W, 3)
             - crop_info: (scale, (y_offset, x_offset)) if center_crop used, None otherwise
         """
-        depth, height, width = volume.shape
+        depth = volume.shape[0]
 
         z_prev = max(0, z_index - 1)
         z_curr = z_index
