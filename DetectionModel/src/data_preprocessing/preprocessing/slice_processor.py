@@ -39,7 +39,6 @@ class SlicePreprocessor:
             (target_size[0], target_size[1], C) for RGB input
         """
         target_h, target_w = target_size
-        is_rgb = len(slice_2d.shape) == 3
         h, w = slice_2d.shape[:2]
 
         if not preserve_aspect_ratio:
@@ -53,20 +52,14 @@ class SlicePreprocessor:
 
         resized = cv2.resize(slice_2d, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
 
-        # Create padded output
-        if is_rgb:
-            output = np.full((target_h, target_w, slice_2d.shape[2]), pad_value, dtype=slice_2d.dtype)
-        else:
-            output = np.full((target_h, target_w), pad_value, dtype=slice_2d.dtype)
+        # Create padded output — shape[2:] is () for 2D, (C,) for 3D; cv2.resize handles both
+        output = np.full((target_h, target_w) + slice_2d.shape[2:], pad_value, dtype=slice_2d.dtype)
 
         # Center the resized image in the output
         y_offset = (target_h - new_h) // 2
         x_offset = (target_w - new_w) // 2
 
-        if is_rgb:
-            output[y_offset:y_offset + new_h, x_offset:x_offset + new_w, :] = resized
-        else:
-            output[y_offset:y_offset + new_h, x_offset:x_offset + new_w] = resized
+        output[y_offset:y_offset + new_h, x_offset:x_offset + new_w] = resized
 
         logger.debug(
             f"Resized slice from ({h}, {w}) to ({target_h}, {target_w}) "
@@ -91,7 +84,6 @@ class SlicePreprocessor:
         """
         target_h, target_w = target_size
         h, w = slice_2d.shape[:2]
-        is_rgb = len(slice_2d.shape) == 3
 
         natural_scale = max(target_h / h, target_w / w)
         scale = min(natural_scale, PreProcessingConstants.MAX_CROP_SCALE)
@@ -99,14 +91,11 @@ class SlicePreprocessor:
         new_h = int(h * scale)
         new_w = int(w * scale)
 
-        # Resize image
+        # Resize image — cv2.resize handles both 2D (H, W) and 3D (H, W, C)
         resized = cv2.resize(slice_2d, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
 
-        # Create output canvas
-        if is_rgb:
-            output = np.zeros((target_h, target_w, slice_2d.shape[2]), dtype=slice_2d.dtype)
-        else:
-            output = np.zeros((target_h, target_w), dtype=slice_2d.dtype)
+        # Create output canvas — shape[2:] is () for 2D, (C,) for 3D
+        output = np.zeros((target_h, target_w) + slice_2d.shape[2:], dtype=slice_2d.dtype)
 
         # Calculate offsets for centering
         # If resized > target: positive offset (we crop from resized)
@@ -126,13 +115,9 @@ class SlicePreprocessor:
         dst_y_end = dst_y_start + (src_y_end - src_y_start)
         dst_x_end = dst_x_start + (src_x_end - src_x_start)
 
-        # Copy resized image to output
-        if is_rgb:
-            output[dst_y_start:dst_y_end, dst_x_start:dst_x_end, :] = \
-                resized[src_y_start:src_y_end, src_x_start:src_x_end, :]
-        else:
-            output[dst_y_start:dst_y_end, dst_x_start:dst_x_end] = \
-                resized[src_y_start:src_y_end, src_x_start:src_x_end]
+        # Copy resized image to output (works for both 2D and 3D)
+        output[dst_y_start:dst_y_end, dst_x_start:dst_x_end] = \
+            resized[src_y_start:src_y_end, src_x_start:src_x_end]
 
         # Effective offset for bbox adjustment:
         # - crop_offset in resized image space (positive = cropped)
