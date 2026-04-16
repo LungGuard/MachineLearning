@@ -4,12 +4,27 @@ Utilities for processing nodule annotations from radiologists.
 """
 
 import logging
-import numpy as np
+from itertools import chain
 from typing import Tuple, Optional, List
-from DetectionModel.constants.enums.centroid import CENTROID
+
+import numpy as np
+
 from DetectionModel.constants.enums.features import Features, DEFAULT_FEATURES
 
 logger = logging.getLogger(__name__)
+
+# Maps Features enum members to their corresponding pylidc annotation attribute names.
+_FEATURE_ATTR: dict = {
+    Features.MALIGNANCY:         "malignancy",
+    Features.SPICULATION:        "spiculation",
+    Features.LOBULATION:         "lobulation",
+    Features.SUBTLETY:           "subtlety",
+    Features.SPHERICITY:         "sphericity",
+    Features.MARGIN:             "margin",
+    Features.TEXTURE:            "texture",
+    Features.CALCIFICATION:      "calcification",
+    Features.INTERNAL_STRUCTURE: "internalStructure",
+}
 
 
 class NoduleAnnotationProcessor:
@@ -54,8 +69,8 @@ class NoduleAnnotationProcessor:
         LIDC-IDRI nodules have 1-4 independent radiologist annotations.
         This function computes consensus features using averaging.
         """
-        default_features = DEFAULT_FEATURES
-        default_features[Features.DIAMETER_MM] = fallback_diameter
+        # Safe copy — avoids mutating the module-level DEFAULT_FEATURES constant.
+        default_features = {**DEFAULT_FEATURES, Features.DIAMETER_MM: fallback_diameter}
 
         def get_feature_value(feature_scores, feature_key):
             """Return the feature value if scores exist, otherwise return default."""
@@ -63,40 +78,18 @@ class NoduleAnnotationProcessor:
                     else default_features[feature_key])
 
         has_annotations = len(annotations) > 0
-
-        malignancy_scores = [ann.malignancy for ann in annotations] if has_annotations else []
-        spiculation_scores = [ann.spiculation for ann in annotations] if has_annotations else []
-        lobulation_scores = [ann.lobulation for ann in annotations] if has_annotations else []
-        subtlety_scores = [ann.subtlety for ann in annotations] if has_annotations else []
-        sphericity_scores = [ann.sphericity for ann in annotations] if has_annotations else []
-        margin_scores = [ann.margin for ann in annotations] if has_annotations else []
-        texture_scores = [ann.texture for ann in annotations] if has_annotations else []
-        calcification_scores = [ann.calcification for ann in annotations] if has_annotations else []
-        internal_structure_scores = [ann.internalStructure for ann in annotations] if has_annotations else []
-        diameters = [float(ann.diameter) for ann in annotations if has_annotations]
+        scores = (
+            {feat: [getattr(ann, attr) for ann in annotations]
+             for feat, attr in _FEATURE_ATTR.items()}
+            if has_annotations
+            else {feat: [] for feat in _FEATURE_ATTR}
+        )
+        diameters = [float(ann.diameter) for ann in annotations] if has_annotations else []
 
         return {
-            Features.DIAMETER_MM: get_feature_value(
-                diameters, Features.DIAMETER_MM),
-            Features.MALIGNANCY: get_feature_value(
-                malignancy_scores, Features.MALIGNANCY),
-            Features.SPICULATION: get_feature_value(
-                spiculation_scores, Features.SPICULATION),
-            Features.LOBULATION: get_feature_value(
-                lobulation_scores, Features.LOBULATION),
-            Features.SUBTLETY: get_feature_value(
-                subtlety_scores, Features.SUBTLETY),
-            Features.SPHERICITY: get_feature_value(
-                sphericity_scores, Features.SPHERICITY),
-            Features.MARGIN: get_feature_value(
-                margin_scores, Features.MARGIN),
-            Features.TEXTURE: get_feature_value(
-                texture_scores, Features.TEXTURE),
-            Features.CALCIFICATION: get_feature_value(
-                calcification_scores, Features.CALCIFICATION),
-            Features.INTERNAL_STRUCTURE: get_feature_value(
-                internal_structure_scores, Features.INTERNAL_STRUCTURE),
-            Features.ANNOTATION_COUNT: len(annotations)
+            Features.DIAMETER_MM: get_feature_value(diameters, Features.DIAMETER_MM),
+            **{feat: get_feature_value(scores[feat], feat) for feat in _FEATURE_ATTR},
+            Features.ANNOTATION_COUNT: len(annotations),
         }
 
     @staticmethod
@@ -160,11 +153,7 @@ class NoduleAnnotationProcessor:
         if not centroids:
             return None
 
-        # Average centroid in original space
-        avg_centroid = tuple(
-            sum(c[i] for c in centroids) / len(centroids)
-            for i in range(len(CENTROID))
-        )
+        og_space_avg_centroid = tuple(np.mean(centroids, axis=0))
 
         # Transform to resampled space if spacing provided (inline CoordinateTransformer math)
         if original_spacing:
@@ -172,10 +161,10 @@ class NoduleAnnotationProcessor:
                 orig / tgt for orig, tgt in zip(original_spacing, target_spacing)
             )
             transformed_centroid = tuple(
-                coord * scale for coord, scale in zip(avg_centroid, scale_factors)
+                coord * scale for coord, scale in zip(og_space_avg_centroid, scale_factors)
             )
         else:
-            transformed_centroid = avg_centroid
+            transformed_centroid = og_space_avg_centroid
 
         # Validate against resampled volume bounds
         z, y, x = transformed_centroid
