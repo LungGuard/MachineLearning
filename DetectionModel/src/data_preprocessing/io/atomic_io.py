@@ -25,11 +25,8 @@ def save_image(image: np.ndarray, image_path: Path) -> bool:
     Returns Saving result
     """
     try:
-        # Convert RGB to BGR for OpenCV
         image_bgr = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
-        save_success = cv2.imwrite(str(image_path), image_bgr)
-        
-        return save_success and image_path.exists()
+        return cv2.imwrite(str(image_path), image_bgr)
     except Exception as e:
         logger.error(f"Image save failed: {e}")
         return False
@@ -55,8 +52,7 @@ def save_label(
         
         with open(label_path, 'w') as f:
             f.write(label_content)
-        
-        return label_path.exists()
+        return True
     except Exception as e:
         logger.error(f"Label save failed: {e}")
         return False
@@ -97,7 +93,7 @@ def atomic_save_image_and_label(
         if image_path.exists():
             try:
                 image_path.unlink()
-                logger.debug(f"Rolled back image deletion: {image_path}")
+                logger.debug(f"Image rolled back (deleted): {image_path}")
             except Exception as e:
                 logger.error(f"Failed to rollback image: {e}")
         
