@@ -19,6 +19,9 @@ from .lung_morphology import compute_lung_body_metrics
 
 logger = logging.getLogger(__name__)
 
+# Index of the "current" slice channel in the 2.5D sandwich (R=prev, G=curr, B=next).
+_SANDWICH_CENTER_CHANNEL = 1
+
 
 @dataclass
 class SliceQualityConfig:
@@ -68,7 +71,7 @@ class SliceQualityGate:
     def _check_quality(self, image: np.ndarray) -> Tuple[bool, str]:
         """All quality checks in one pass."""
         c = self.config
-        check_slice = image[:, :, image.shape[2] // 2] if len(image.shape) == 3 else image
+        check_slice = image[:, :, _SANDWICH_CENTER_CHANNEL] if len(image.shape) == 3 else image
         gray = self._to_uint8(check_slice)
         total = gray.size
 
@@ -86,7 +89,7 @@ class SliceQualityGate:
             (lung_body_ratio < c.min_lung_body_ratio, f"INSUFFICIENT_LUNG (ratio={lung_body_ratio:.3f})"),
         ]
 
-        failures = list(filter(lambda chk: chk[0], checks))
+        failures = [chk for chk in checks if chk[0]]
         passed = len(failures) == 0
         reason = failures[0][1] if failures else "OK"
         return passed, reason
@@ -109,19 +112,16 @@ class SliceQualityGate:
         """CLAHE on single- or multi-channel images."""
         c = self.config
         clahe = cv2.createCLAHE(clipLimit=c.clahe_clip_limit, tileGridSize=c.clahe_grid_size)
-        result = (
-            np.stack(
-                list(map(lambda ch: clahe.apply(self._to_uint8(image[:, :, ch])), range(image.shape[2]))),
+        if len(image.shape) == 3:
+            return np.stack(
+                [clahe.apply(self._to_uint8(image[:, :, ch])) for ch in range(image.shape[2])],
                 axis=2
             )
-            if len(image.shape) == 3
-            else clahe.apply(self._to_uint8(image))
-        )
-        return result
+        return clahe.apply(self._to_uint8(image))
 
     @staticmethod
     def _to_uint8(arr: np.ndarray) -> np.ndarray:
-        is_float_01 = arr.dtype in (np.float32, np.float64) and arr.max() <= 1.0
+        is_float_01 = arr.dtype in (np.float32, np.float64) and arr.max() <= 1.0 + 1e-6
         converted = (
             (arr * 255).clip(0, 255).astype(np.uint8)
             if is_float_01

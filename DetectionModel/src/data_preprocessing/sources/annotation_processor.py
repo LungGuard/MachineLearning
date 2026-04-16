@@ -121,14 +121,12 @@ class NoduleAnnotationProcessor:
             else 1.0
         )
 
-        all_valid_indices = map(
-            lambda ann: NoduleAnnotationProcessor._get_valid_slice_indices_from_annotation(
+        unique_indices = set(chain.from_iterable(
+            NoduleAnnotationProcessor._get_valid_slice_indices_from_annotation(
                 ann, z_scale, volume_depth
-            ),
-            annotations
-        )
-
-        unique_indices = {idx for indices in all_valid_indices for idx in indices}
+            )
+            for ann in annotations
+        ))
 
         return sorted(unique_indices)
 
