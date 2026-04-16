@@ -62,19 +62,25 @@ class BoundingBoxConverter:
         )
         
         is_valid_bbox_bounds = (
-            (x_norm - w_norm/2 >= 0) and 
+            (x_norm - w_norm/2 >= 0) and
             (x_norm + w_norm/2 <= 1) and
-            (y_norm - h_norm/2 >= 0) and 
+            (y_norm - h_norm/2 >= 0) and
             (y_norm + h_norm/2 <= 1)
         )
-        
-        result = (
-            (float(x_norm), float(y_norm), float(w_norm), float(h_norm))
-            if is_valid_bbox_bounds
-            else (float(x_norm), float(y_norm),
-                  float(min(w_norm, 2*min(x_norm, 1-x_norm))),
-                  float(min(h_norm, 2*min(y_norm, 1-y_norm))))
-        )
+
+        if not is_valid_bbox_bounds:
+            # Clip width/height so the bbox edges stay within [0, 1].
+            # max(..., 0.001) preserves the minimum valid bbox size.
+            w_clipped = max(min(w_norm, 2 * min(x_norm, 1 - x_norm)), 0.001)
+            h_clipped = max(min(h_norm, 2 * min(y_norm, 1 - y_norm)), 0.001)
+            logger.warning(
+                f"Bbox out of bounds: center=({x_norm:.4f}, {y_norm:.4f}) "
+                f"size=({w_norm:.4f}, {h_norm:.4f}) -> clipped to "
+                f"({w_clipped:.4f}, {h_clipped:.4f})"
+            )
+            result = (float(x_norm), float(y_norm), float(w_clipped), float(h_clipped))
+        else:
+            result = (float(x_norm), float(y_norm), float(w_norm), float(h_norm))
 
         return result
 
