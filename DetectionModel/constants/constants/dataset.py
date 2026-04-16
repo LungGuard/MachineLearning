@@ -7,7 +7,7 @@ class DatasetConstants:
     FILE_NAME = 'filename'
     PATIENT_ID = 'patient_id'
     SPLIT_GROUP = 'split_group'
-    NOUDLE_INDEX = 'nodule_index'
+    NODULE_INDEX = 'nodule_index'
     SLICE_INDEX = 'slice_index'
     IMAGE_PATH = 'image_path'
     LABEL_PATH = 'label_path'

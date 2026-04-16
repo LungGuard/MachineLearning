@@ -312,7 +312,7 @@ class CTScanProcessor:
             DatasetConstants.FILE_NAME: filename,
             DatasetConstants.PATIENT_ID: patient_id,
             DatasetConstants.SPLIT_GROUP: split,
-            DatasetConstants.NOUDLE_INDEX: nodule.index,
+            DatasetConstants.NODULE_INDEX: nodule.index,
             DatasetConstants.SLICE_INDEX: slice_idx,
             **feature_dict,
             **centroid_dict,
