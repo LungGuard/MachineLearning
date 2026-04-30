@@ -1,152 +1,112 @@
-import logging
 import base64
+import logging
 import uuid
 from pathlib import Path
-from typing import Protocol, runtime_checkable, Optional
+from typing import Optional, Protocol, runtime_checkable
 
 import cv2
 import numpy as np
 import torch
 import torch.nn.functional as F
 
-from common.dto import PipelineResults, Nodule, BoundingBox, CancerClass
-from DetectionModel.src.dto.nodule_features import NoduleFeatures
+from common.constants import InferenceConstants
+from common.dto import BoundingBox, CancerClass, Nodule, NoduleFeatures, PipelineResults
+from common.model_protocols import *
 from DetectionModel.src.data_preprocessing.config import DataPrepConfig
-from DetectionModel.src.data_preprocessing.sources.scan_adapters import DICOMScanSource
-from DetectionModel.src.data_preprocessing.preprocessing.volume_processor import VolumePreprocessingPipeline
+from DetectionModel.src.data_preprocessing.core.scan_protocols import (
+    DetectedNodule,
+    SliceDetectionResult,
+)
 from DetectionModel.src.data_preprocessing.pipelines.inference_processor import InferencePipeline
 from DetectionModel.src.data_preprocessing.preprocessing.slice_quality_gate import SliceQualityGate
+from DetectionModel.src.data_preprocessing.preprocessing.volume_processor import VolumePreprocessingPipeline
+from DetectionModel.src.data_preprocessing.sources.scan_adapters import DICOMScanSource
 
 logger = logging.getLogger(__name__)
 
-CLASSIFICATION_INPUT_SIZE = (224, 224)
-REGRESSION_INPUT_SIZE = (64, 64)
-DEFAULT_MALIGNANCY_THRESHOLD = 3.0
-DEFAULT_CONFIDENCE_THRESHOLD = 0.5
 
 
-# ══════════════════════════════════════════════════════
-#  Model Protocols — inject any implementation
-# ══════════════════════════════════════════════════════
 
-@runtime_checkable
-class DetectionModelProtocol(Protocol):
-    """Contract for YOLO-based nodule detection."""
-
-    def eval(self) -> None: ...
-    def predict_step(self, batch: tuple, batch_idx: int,
-                     dataloader_idx: int = 0) -> list[dict]: ...
-
-
-@runtime_checkable
-class RegressionModelProtocol(Protocol):
-    """Contract for nodule feature regression."""
-
-    def predict_features(self, x: torch.Tensor) -> list[NoduleFeatures]: ...
-
-
-@runtime_checkable
-class ClassificationModelProtocol(Protocol):
-    """Contract for cancer type classification."""
-
-    def predict(self, images: np.ndarray) -> list[dict]: ...
-
-
-# ══════════════════════════════════════════════════════
-#  Main Inference Pipeline
-# ══════════════════════════════════════════════════════
 
 class MainPipeline:
     def __init__(self,
                  detection_model: DetectionModelProtocol,
                  regression_model: RegressionModelProtocol,
                  classification_model: ClassificationModelProtocol,
-                 config: DataPrepConfig = None,
-                 malignancy_threshold: float = DEFAULT_MALIGNANCY_THRESHOLD,
-                 confidence_threshold: float = DEFAULT_CONFIDENCE_THRESHOLD):
+                 config: Optional[DataPrepConfig] = None,
+                 inference_constants: InferenceConstants = InferenceConstants(),
+                 malignancy_threshold: Optional[float] = None,
+                 confidence_threshold: Optional[float] = None):
 
         self.detection_model = detection_model
         self.regression_model = regression_model
         self.classification_model = classification_model
         self.config = config or DataPrepConfig()
-        self.malignancy_threshold = malignancy_threshold
-        self.confidence_threshold = confidence_threshold
+        self.inference_constants = inference_constants
+        self.malignancy_threshold = (
+            malignancy_threshold
+            if malignancy_threshold is not None
+            else inference_constants.DEFAULT_MALIGNANCY_THRESHOLD
+        )
+        self.confidence_threshold = (
+            confidence_threshold
+            if confidence_threshold is not None
+            else inference_constants.DEFAULT_CONFIDENCE_THRESHOLD
+        )
 
         self.volume_preprocessor = VolumePreprocessingPipeline(self.config)
         quality_gate = SliceQualityGate()
         self.inference_pipeline = InferencePipeline(self.config, quality_gate)
 
-    # ──────────────────────────────────────────
-    #  Public API
-    # ──────────────────────────────────────────
-
     def __call__(self, dicom_dir: Path) -> PipelineResults:
         patient_id = f"inf_{uuid.uuid4().hex[:8]}"
 
-        # Stage 0 — Load DICOM volume
         volume_data = self._load_dicom_volume(dicom_dir, patient_id)
         if volume_data is None:
             return self._empty_results("Failed to load DICOM volume")
 
-        # Stage 1 — Preprocess volume
         preprocess_result = self._preprocess_volume(volume_data, patient_id)
         if preprocess_result is None:
             return self._empty_results("Volume preprocessing failed")
         preprocessed_volume = preprocess_result[0]
 
-        # Stage 2 — Detect nodules (YOLO)
         detection_results = self._detect_nodules(preprocessed_volume, patient_id)
-
-        # Stage 3 — Predict nodule features (regression)
         nodules = self._predict_nodule_features(detection_results)
 
-        # Stage 4 — Classify cancer type (only if thresholds exceeded)
-        cancer_class = None
+        cancer_class: Optional[CancerClass] = None
         if self._should_classify(nodules):
             cancer_class = self._classify_cancer(detection_results)
-            logger.info(f"[{patient_id}] Classification triggered — "
-                        f"threshold exceeded")
+            logger.info(f"[{patient_id}] Classification triggered — threshold exceeded")
         else:
-            logger.info(f"[{patient_id}] Classification skipped — "
-                        f"no nodule exceeded thresholds")
+            logger.info(f"[{patient_id}] Classification skipped — no nodule exceeded thresholds")
 
-        # Stage 5 — Assemble results
-        total_detections = sum(len(r["nodules"]) for r in detection_results)
-        notes = (f"Processed {len(detection_results)} slices, "
-                 f"detected {total_detections} nodule(s)")
+        total_detections = sum(len(r.nodules) for r in detection_results)
+        notes = (
+            f"Processed {len(detection_results)} slices, "
+            f"detected {total_detections} nodule(s)"
+        )
         if cancer_class is None and nodules:
             notes += " (classification skipped — below threshold)"
 
         return self._build_results(nodules, cancer_class, notes)
 
-    # ──────────────────────────────────────────
-    #  Stage 0 — DICOM Loading
-    # ──────────────────────────────────────────
-
     def _load_dicom_volume(self, dicom_dir: Path, patient_id: str):
         try:
-            source = DICOMScanSource(dicom_dir=dicom_dir,
-                                     patient_id_override=patient_id)
+            source = DICOMScanSource(
+                dicom_dir=dicom_dir, patient_id_override=patient_id
+            )
             return source.load_volume()
         except Exception as e:
             logger.error(f"[{patient_id}] DICOM loading failed: {e}")
             return None
-
-    # ──────────────────────────────────────────
-    #  Stage 1 — Volume Preprocessing
-    # ──────────────────────────────────────────
 
     def _preprocess_volume(self, volume_data, patient_id: str):
         return self.volume_preprocessor.preprocess(
             volume_data.volume, volume_data.spacing, patient_id
         )
 
-    # ──────────────────────────────────────────
-    #  Stage 2 — Nodule Detection (YOLO)
-    # ──────────────────────────────────────────
-
     def _detect_nodules(self, volume: np.ndarray,
-                        patient_id: str) -> list[dict]:
+                        patient_id: str) -> list[SliceDetectionResult]:
         processed_slices = self.inference_pipeline.prepare_slices_for_yolo(
             volume, patient_id
         )
@@ -155,72 +115,72 @@ class MainPipeline:
             logger.warning(f"[{patient_id}] No slices passed quality gate")
             return []
 
-        # Convert (H, W, 3) uint8 numpy → (3, H, W) float32 tensor
-        tensors = []
-        for ps in processed_slices:
-            img = ps.enhanced_25d.astype(np.float32) / 255.0
-            tensor = torch.from_numpy(img).permute(2, 0, 1)  # HWC → CHW
-            tensors.append(tensor)
-
-        batch = torch.stack(tensors)
+        batch = self._build_yolo_batch(processed_slices)
 
         with torch.inference_mode():
             self.detection_model.eval()
-            results = self.detection_model.predict_step(
-                (batch, None), batch_idx=0
-            )
+            return self.detection_model.predict_step((batch, None), batch_idx=0)
 
-        return results
+    def _build_yolo_batch(self, processed_slices) -> torch.Tensor:
+        normalizer = self.inference_constants.YOLO_PIXEL_NORMALIZER
+        tensors = [
+            torch.from_numpy(
+                ps.enhanced_25d.astype(np.float32) / normalizer
+            ).permute(2, 0, 1)
+            for ps in processed_slices
+        ]
+        return torch.stack(tensors)
 
-    # ──────────────────────────────────────────
-    #  Stage 3 — Nodule Feature Regression
-    # ──────────────────────────────────────────
-
-    def _predict_nodule_features(self, detection_results: list[dict]) -> list[Nodule]:
-        all_nodules = [nodule for result in detection_results
-                       for nodule in result["nodules"]]
+    def _predict_nodule_features(
+        self, detection_results: list[SliceDetectionResult]
+    ) -> list[Nodule]:
+        all_nodules: list[DetectedNodule] = [
+            nodule
+            for result in detection_results
+            for nodule in result.nodules
+        ]
 
         if not all_nodules:
             return []
 
-        # Resize regression crops to (3, 64, 64)
-        crops = []
-        for nodule in all_nodules:
-            crop = nodule["regression_input"]  # (3, crop_H, crop_W) tensor
-            resized = F.interpolate(
-                crop.unsqueeze(0).float(),
-                size=REGRESSION_INPUT_SIZE,
-                mode="bilinear",
-                align_corners=False
-            ).squeeze(0)
-            crops.append(resized)
-
-        crop_batch = torch.stack(crops)
+        crop_batch = self._resize_regression_crops(all_nodules)
         features_list = self.regression_model.predict_features(crop_batch)
 
-        nodule_dtos = []
-        for nodule_dict, features in zip(all_nodules, features_list):
-            nodule_image_b64 = self._encode_nodule_image(
-                nodule_dict["regression_input"]
-            )
-            nodule_dtos.append(Nodule(
-                nodule_id=uuid.uuid4().hex[:8],
-                bbox=BoundingBox(
-                    x=nodule_dict["x"],
-                    y=nodule_dict["y"],
-                    height=nodule_dict["h"],
-                    width=nodule_dict["w"],
-                ),
-                confidence=nodule_dict["confidence"],
-                nodule_features=features,
-                nodule_image=nodule_image_b64,
-            ))
+        return [
+            self._build_nodule_dto(detected, features)
+            for detected, features in zip(all_nodules, features_list)
+        ]
 
-        return nodule_dtos
+    def _resize_regression_crops(
+        self, detected_nodules: list[DetectedNodule]
+    ) -> torch.Tensor:
+        target_size = self.inference_constants.REGRESSION_INPUT_SIZE
+        crops = [
+            F.interpolate(
+                detected.regression_input.unsqueeze(0).float(),
+                size=target_size,
+                mode="bilinear",
+                align_corners=False,
+            ).squeeze(0)
+            for detected in detected_nodules
+        ]
+        return torch.stack(crops)
 
-    # ──────────────────────────────────────────
-    #  Threshold Gate
-    # ──────────────────────────────────────────
+    def _build_nodule_dto(
+        self, detected: DetectedNodule, features: NoduleFeatures
+    ) -> Nodule:
+        return Nodule(
+            nodule_id=uuid.uuid4().hex[:8],
+            bbox=BoundingBox(
+                x=detected.x,
+                y=detected.y,
+                height=detected.h,
+                width=detected.w,
+            ),
+            confidence=detected.confidence,
+            nodule_features=features,
+            nodule_image=self._encode_nodule_image(detected.regression_input),
+        )
 
     def _should_classify(self, nodules: list[Nodule]) -> bool:
         return any(
@@ -229,42 +189,32 @@ class MainPipeline:
             for n in nodules
         )
 
-    # ──────────────────────────────────────────
-    #  Stage 4 — Cancer Classification
-    # ──────────────────────────────────────────
-
-    def _classify_cancer(self, detection_results: list[dict]) -> Optional[CancerClass]:
+    def _classify_cancer(
+        self, detection_results: list[SliceDetectionResult]
+    ) -> Optional[CancerClass]:
         if not detection_results:
             return None
 
-        images = []
-        for result in detection_results:
-            classifier_input = result["classifier_input"]  # (1, H, W) tensor
-            slice_np = classifier_input.squeeze(0).numpy()  # (H, W)
-            resized = cv2.resize(slice_np, CLASSIFICATION_INPUT_SIZE,
-                                 interpolation=cv2.INTER_LINEAR)
-            images.append(resized)
+        target_size = self.inference_constants.CLASSIFICATION_INPUT_SIZE
+        images = [
+            cv2.resize(
+                result.classifier_input.squeeze(0).numpy(),
+                target_size,
+                interpolation=cv2.INTER_LINEAR,
+            )
+            for result in detection_results
+        ]
 
-        # Stack into (N, 224, 224, 1) for Keras model
         batch = np.stack(images)[..., np.newaxis]
 
-        predictions = self.classification_model.predict(batch)
-        if not predictions:
+        if predictions := self.classification_model.predict(batch):
+            return max(predictions, key=lambda p: p.confidence)
+        else:
             return None
-
-        best = max(predictions, key=lambda p: p["confidence"])
-        return CancerClass(
-            cancer_type=best["cancer_type"],
-            confidence=float(best["confidence"])
-        )
-
-    # ──────────────────────────────────────────
-    #  Helpers
-    # ──────────────────────────────────────────
 
     @staticmethod
     def _encode_nodule_image(crop_tensor: torch.Tensor) -> str:
-        middle = crop_tensor[1].numpy()  # middle channel (H, W)
+        middle = crop_tensor[1].numpy()
         img_uint8 = (middle * 255).clip(0, 255).astype(np.uint8)
         _, encoded = cv2.imencode(".png", img_uint8)
         return base64.b64encode(encoded).decode("utf-8")

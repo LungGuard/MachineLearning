@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from typing import Protocol, List, Tuple, Dict, Optional, runtime_checkable
 
 import numpy as np
+import torch
 
 
 
@@ -33,11 +34,6 @@ class NoduleData:
     features: Dict[str, float]
     slice_indices: List[int]
     raw_annotations: object = field(default=None, repr=False)
-
-
-# ──────────────────────────────────────────────
-# Inference Data Containers
-# ──────────────────────────────────────────────
 
 @dataclass(frozen=True)
 class YOLODetection:
@@ -65,6 +61,24 @@ class NoduleCropResult:
     full_slice_enhanced: np.ndarray
     nodule_crop_single: np.ndarray
     nodule_crop_25d: np.ndarray
+
+
+@dataclass(frozen=True)
+class DetectedNodule:
+    x: float
+    y: float
+    h: float
+    w: float
+    confidence: float
+    regression_input: torch.Tensor
+
+
+@dataclass(frozen=True)
+class SliceDetectionResult:
+    batch_idx: int
+    sample_idx: int
+    classifier_input: torch.Tensor
+    nodules: List[DetectedNodule]
 
 
 
