@@ -25,3 +25,6 @@ class Decoration(StrEnum):
     BOLD_GREEN = "bold green"
     BOLD_YELLOW = "bold yellow"
     BOLD_CYAN = "bold cyan"
+
+    def __call__(self, msg: str) -> str:
+        return f'[{self.value}]{msg}[/{self.value}]'

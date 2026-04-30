@@ -2,7 +2,7 @@ from enum import StrEnum, Enum
 from ..mixins import EnumMixin
 
 
-class Metrics(StrEnum,EnumMixin):
+class Metrics(EnumMixin, StrEnum):
     ACCURACY = 'accuracy'
     PRECISION = 'precision'
     RECALL = 'recall'

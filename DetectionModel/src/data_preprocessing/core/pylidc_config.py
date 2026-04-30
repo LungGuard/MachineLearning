@@ -25,7 +25,8 @@ def get_pylidc_config_path() -> Path:
 
 def normalize_dicom_path(dicom_path: str) -> str:
     """Normalize DICOM path to absolute cross-platform format."""
-    path_obj = Path(dicom_path)
+    # Strip surrounding quotes that a user may accidentally include (e.g. '/path/to/data')
+    path_obj = Path(dicom_path.strip().strip("'\""))
     
     absolute_path = path_obj.resolve()
     
