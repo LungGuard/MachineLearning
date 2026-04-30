@@ -1,19 +1,27 @@
-from dataclasses import dataclass
 import os
+from dataclasses import dataclass, field
+
+
+def _require_env(name: str) -> str:
+    if value := os.getenv(name):
+        return value
+    else:
+        raise RuntimeError(
+            f"Required environment variable {name!r} is not set. "
+            "Refusing to start with insecure defaults."
+        )
+
 
 @dataclass
 class MiddlewareConfig:
-    GATEWAY_TOKEN : str = os.getenv("GATEWAY_SECRET","secret-key")
-    HEALTH_PATHS: set[str] = { "/health" , "/actuator" }
+    GATEWAY_TOKEN: str = field(default_factory=lambda: _require_env("GATEWAY_SECRET"))
+    HEALTH_PATHS: frozenset[str] = field(
+        default_factory=lambda: frozenset({"/health", "/actuator"})
+    )
 
 
 @dataclass
 class EurekaConfig:
-    
-    EUREKA_SERVER : str = os.getenv("EUREKA_SERVER",
-                                     "http://eureka:eureka123@localhost:8761/eureka")
-    
-    APP_NAME : str = "MACHINE-LEARNING-SERVICE"
-
-    APP_PORT : int = int(os.getenv("APP_PORT", "8000"))
-    
+    EUREKA_SERVER: str = field(default_factory=lambda: _require_env("EUREKA_SERVER"))
+    APP_NAME: str = "MACHINE-LEARNING-SERVICE"
+    APP_PORT: int = field(default_factory=lambda: int(os.getenv("APP_PORT", "8000")))
