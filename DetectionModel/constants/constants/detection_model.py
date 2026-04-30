@@ -19,7 +19,6 @@ def resolve_dataset_yaml(yaml_path: Path = ProjectPaths.DETECTION_DATASET_YAML) 
     yaml_path = Path(yaml_path).resolve()
     text = yaml_path.read_text()
 
-    # Replace the `path:` line with the resolved parent directory
     dataset_dir = str(yaml_path.parent).replace("\\", "/")
     new_text = re.sub(r"(?m)^path:.*$", f"path: {dataset_dir}", text)
 
@@ -36,3 +35,14 @@ class DetectionModelConstants:
     DATASET_YAML = ProjectPaths.DETECTION_DATASET_YAML
     LOG_DIR = ProjectPaths.LOGS_DIR
     MODEL_FILE_NAME = "detection_model_checkpoint"
+
+    NMS_CONF_THRESHOLD = 0.25
+    NMS_IOU_THRESHOLD = 0.45
+
+    OPTIMIZER_WEIGHT_DECAY = 1e-3
+    LR_SCHEDULER_FACTOR = 0.5
+    LR_SCHEDULER_PATIENCE = 5
+
+    DEFAULT_MODEL_YAML = "yolov8l.yaml"
+    DEFAULT_PRETRAINED_WEIGHTS = "yolov8l.pt"
+    NUM_CLASSES = 1

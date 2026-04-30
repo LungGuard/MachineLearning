@@ -1,5 +1,5 @@
-from pydantic import BaseModel
 import torch
+from pydantic import BaseModel
 
 
 class NoduleFeatures(BaseModel):
@@ -12,9 +12,8 @@ class NoduleFeatures(BaseModel):
     texture: float
     calcification: float
 
-
     @classmethod
-    def from_tensor(cls, tensor: torch.Tensor):
+    def from_tensor(cls, tensor: torch.Tensor) -> "NoduleFeatures":
         values = tensor.detach().cpu().numpy().flatten()
         return cls(
             malignancy=float(values[0]),
@@ -24,5 +23,5 @@ class NoduleFeatures(BaseModel):
             sphericity=float(values[4]),
             margin=float(values[5]),
             texture=float(values[6]),
-            calcification=float(values[7])
+            calcification=float(values[7]),
         )

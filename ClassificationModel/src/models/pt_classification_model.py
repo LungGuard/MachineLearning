@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 from ClassificationModel.constants.constants.model import ModelConstants
 from ClassificationModel.constants.constants.dataset import DatasetConstants
 from common.base_cnn_model import BaseCNNModel
+from common.dto import CancerClass
 import torch
 import torch.nn as nn
 
@@ -47,25 +48,21 @@ class PtCancerClassificationModel(BaseCNNModel):
         
         return x
     
-    def predict(self,images):
-        
+    def predict(self, images) -> list[CancerClass]:
         self.eval()
-        device=next(self.parameters()).device
+        device = next(self.parameters()).device
         images = images.to(device)
 
         with torch.no_grad():
             logits = self(images)
             probabilities = torch.softmax(logits, dim=1)
             confidences, predicted_indices = torch.max(probabilities, 1)
-            
+
             confidences = confidences.cpu().numpy()
             predicted_indices = predicted_indices.cpu().numpy()
             class_names = self.dataset.class_names
-            
+
             return [
-                {
-                    ModelConstants.CANCER_TYPE_RESULT_KEY: class_names[idx],
-                    ModelConstants.CONFIDENCE_KEY: float(conf)
-                }
+                CancerClass(cancer_type=class_names[idx], confidence=float(conf))
                 for idx, conf in zip(predicted_indices, confidences)
             ]

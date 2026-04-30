@@ -6,7 +6,7 @@ from torchmetrics import MetricCollection
 from typing import Union
 
 from DetectionModel.constants.constants.regression_model import RegressionModelConstants
-from DetectionModel.src.dto.nodule_features import NoduleFeatures
+from common.dto import NoduleFeatures
 from DetectionModel.constants.enums.features import Features
 from common.constants.metrics import Metrics
 from common.constants.model_stages import ModelStage

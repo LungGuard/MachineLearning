@@ -16,6 +16,7 @@ from common.notification_service import NtfyNotificationService
 from ClassificationModel.src.data_processing.image_augmentation import ImageAugmentationPipeline,apply_augmentation
 from common.base_cnn_model import BaseCNNModel
 from common.constants import Activation,Metrics,Loss
+from common.dto import CancerClass
 class CancerClassificationModel(BaseCNNModel):
     def __init__(self, dataset, input_shape, model_name=ModelConstants.MODEL_NAME, checkpoint_path=None):
         super().__init__(input_shape=input_shape, model_name=model_name)
@@ -46,7 +47,6 @@ class CancerClassificationModel(BaseCNNModel):
             normalization_layer
         ])
         
-        # Using helper methods from BaseCNNModel
         self._add_conv_block(filters=32)
         self._add_conv_block(filters=64)
         self._add_conv_block(filters=128)
@@ -93,17 +93,14 @@ class CancerClassificationModel(BaseCNNModel):
         )
         return history
     
-    def predict(self, images):
+    def predict(self, images) -> list[CancerClass]:
         predictions = self.model.predict(images)
         confidences = np.max(predictions, axis=1)
         predicted_indices = np.argmax(predictions, axis=1)
         predicted_class_names = [self.class_names[idx] for idx in predicted_indices]
-        
+
         return [
-            {
-                ModelConstants.CANCER_TYPE_RESULT_KEY: cancer_type,
-                ModelConstants.CONFIDENCE_KEY: confidence
-            }
+            CancerClass(cancer_type=cancer_type, confidence=float(confidence))
             for cancer_type, confidence in zip(predicted_class_names, confidences)
         ]
     

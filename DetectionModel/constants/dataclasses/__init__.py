@@ -1,2 +1,1 @@
-from DetectionModel.src.dto.nodule_features import NoduleFeatures
 from DetectionModel.constants.dataclasses.transforms import TransformValues
