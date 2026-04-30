@@ -9,7 +9,7 @@ import httpx
 from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel
 
-from common.constants import ApiConstants
+from common.constants import ApiConstants,DownloadLimits
 from common.constants.status_codes import StatusCode
 from common.dto import PipelineResults
 from middleware.eureka_config import deregister_eureka, register_eureka
@@ -19,12 +19,14 @@ from pipeline import MainPipeline
 
 logger = logging.getLogger(__name__)
 
-# Hard ceiling on uncompressed ZIP contents. A presigned PUT does not constrain
-# size on the client side, so we enforce it here as a zip-bomb guard.
-MAX_UNCOMPRESSED_BYTES = 2 * 1024 * 1024 * 1024  # 2 GiB
-DOWNLOAD_TIMEOUT = httpx.Timeout(connect=10.0, read=120.0, write=30.0, pool=10.0)
-
+download_limits= DownloadLimits()
 eureka_config = EurekaConfig()
+
+DOWNLOAD_TIMEOUT = httpx.Timeout(connect=download_limits.connect,
+                                 read=download_limits.read,
+                                 write=download_limits.write, 
+                                 pool=download_limits.pool)
+
 
 # Lazy pipeline singleton. The actual model loading is intentionally not wired
 # here — plug the detection / regression / classification model constructors
@@ -93,10 +95,10 @@ def analyze(
 
 def _download(url: str, dest: Path) -> None:
     try:
-        with httpx.stream("GET", url, timeout=DOWNLOAD_TIMEOUT, follow_redirects=True) as response:
+        with httpx.stream(method="GET", url=url, timeout=DOWNLOAD_TIMEOUT, follow_redirects=True) as response:
             if response.status_code >= 400:
                 raise HTTPException(
-                    status_code=502,
+                    status_code=StatusCode.BAD_GATEWAY,
                     detail=f"failed to download scan: status {response.status_code}",
                 )
             with dest.open("wb") as fh:
@@ -104,16 +106,19 @@ def _download(url: str, dest: Path) -> None:
                     fh.write(chunk)
     except httpx.HTTPError as e:
         logger.warning("Download failed: %s", e)
-        raise HTTPException(status_code=502, detail=f"failed to download scan: {e}")
+        raise HTTPException(status_code=StatusCode.BAD_GATEWAY, detail=f"failed to download scan: {e}")
+
 
 
 def _safe_extract(zip_path: Path, dest: Path) -> None:
     try:
         with zipfile.ZipFile(zip_path) as archive:
+            # Hard ceiling on uncompressed ZIP contents. A presigned PUT does not constrain
+            # size on the client side, so we enforce it here as a zip-bomb guard.
             total_uncompressed = sum(m.file_size for m in archive.infolist())
-            if total_uncompressed > MAX_UNCOMPRESSED_BYTES:
+            if total_uncompressed > ApiConstants.MAX_UNCOMPRESSED_BYTES:
                 raise HTTPException(
-                    status_code=422,
+                    status_code=StatusCode.UNPROCESSABLE_CONTENT,
                     detail=f"scan archive exceeds size limit: {total_uncompressed} bytes",
                 )
 
@@ -123,12 +128,12 @@ def _safe_extract(zip_path: Path, dest: Path) -> None:
                 target = (dest / member.filename).resolve()
                 if not str(target).startswith(str(dest_root)):
                     raise HTTPException(
-                        status_code=422,
+                        status_code=StatusCode.UNPROCESSABLE_CONTENT,
                         detail=f"unsafe zip entry: {member.filename}",
                     )
             archive.extractall(dest)
     except zipfile.BadZipFile as e:
-        raise HTTPException(status_code=422, detail=f"invalid zip archive: {e}")
+        raise HTTPException(status_code=StatusCode.UNPROCESSABLE_CONTENT, detail=f"invalid zip archive: {e}")
 
 
 def _locate_dicom_dir(root: Path) -> Path:
@@ -141,7 +146,7 @@ def _locate_dicom_dir(root: Path) -> Path:
     )
     if not candidates:
         raise HTTPException(
-            status_code=422,
+            status_code=StatusCode.UNPROCESSABLE_CONTENT,
             detail="archive does not contain any .dcm files",
         )
     return candidates[0]
