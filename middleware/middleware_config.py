@@ -25,3 +25,5 @@ class EurekaConfig:
     EUREKA_SERVER: str = field(default_factory=lambda: _require_env("EUREKA_SERVER"))
     APP_NAME: str = "MACHINE-LEARNING-SERVICE"
     APP_PORT: int = field(default_factory=lambda: int(os.getenv("APP_PORT", "8000")))
+    RENEWAL_INTERVAL_IN_SECS: int = 30
+    LEASE_DURATION_IN_SECS: int = 90

@@ -1,30 +1,31 @@
-import datetime
-
 from fastapi import Request
-from fastapi.responses import JSONResponse
-from starlette.middleware.base import BaseHTTPMiddleware
 
-from common.constants import Header, StatusCode
+from common.constants import Header
+from common.dto import error_response
 
 from .middleware_config import MiddlewareConfig
-from .middleware_contants import GatewayAuthConstants
 
 config = MiddlewareConfig()
 
 
-class GatewayAuthMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next):
-        if self._is_health_path(request) or self._is_authorized(request):
-            return await call_next(request)
+class GatewayAuthMiddleware:
+    """Pure ASGI middleware — avoids BaseHTTPMiddleware's exception-swallowing."""
 
-        return JSONResponse(
-            status_code=StatusCode.FORBIDDEN,
-            content={
-                GatewayAuthConstants.ERROR_RESPONSE_FIELD : GatewayAuthConstants.ERROR_RESPONSE,
-                GatewayAuthConstants.MESSAGE_RESPONSE_FIELD : GatewayAuthConstants.MESSAGE_RESPONSE ,
-                GatewayAuthConstants.TIMESTAMP_RESPONSE_FIELD : datetime.datetime.now(datetime.timezone.utc).isoformat(),
-            },
-        )
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        request = Request(scope, receive)
+        if self._is_health_path(request) or self._is_authorized(request):
+            await self.app(scope, receive, send)
+            return
+
+        response = error_response(403, "forbidden", "Direct access not allowed, use API Gateway")
+        await response(scope, receive, send)
 
     @staticmethod
     def _is_health_path(request: Request) -> bool:
