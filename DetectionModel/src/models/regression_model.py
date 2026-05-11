@@ -24,20 +24,24 @@ class NoduleFeaturesModel(L.LightningModule,ModelMixin):
                  learning_rate : float = RegressionModelConstants.DEFAULT_LEARNING_RATE,
                  metrics : Union[dict,MetricCollection] = None,
                  conv_layers_channels : Union[list[int],tuple[int]] = (32,64,128),
-                 dense_layers_channels : Union[list[int],tuple[int]] =(128, 64)):
+                 dense_layers_channels : Union[list[int],tuple[int]] =(128, 64),
+                 weight_decay: float = None,
+                 loss_fn = nn.MSELoss()):
         super(NoduleFeaturesModel, self).__init__()
 
         self.save_hyperparameters(ignore=[HyperParameters.METRICS,
-                                          HyperParameters.LAYERS])
+                                          HyperParameters.LAYERS
+                                          ])
 
         self.input_shape = input_shape
         self.channels, self.height, self.width = input_shape
         self.learning_rate = learning_rate
+        self.weight_decay=weight_decay
 
         self.feature_extractor = nn.Sequential()
         self.regressor = nn.Sequential()
         
-        self.loss_fn = nn.MSELoss() 
+        self.loss_fn = loss_fn
         
         self._build_model(conv_layers=conv_layers_channels,
                           dense_layers=dense_layers_channels)
@@ -109,8 +113,13 @@ class NoduleFeaturesModel(L.LightningModule,ModelMixin):
         return loss
 
     def configure_optimizers(self):
-            optimizer = torch.optim.Adam(self.parameters(), lr=self.learning_rate)
-            
+            if self.weight_decay:
+                optimizer = torch.optim.Adam(self.parameters(),
+                                         lr=self.learning_rate,
+                                         weight_decay=self.weight_decay)
+            else:
+                optimizer = torch.optim.Adam(self.parameters(),
+                                         lr=self.learning_rate)
             scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
                 optimizer, 
                 mode='min', 

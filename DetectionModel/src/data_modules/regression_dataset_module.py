@@ -48,7 +48,7 @@ class NoduleRegressionDataset(Dataset):
         target_features: list[str],
         crop_size: int = DatasetConstants.DEFAULT_CROP_SIZE,
         augment: bool = False,
-        target_scaler = None 
+        target_scaler = StandardScaler() 
     ):
         self.dataframe = dataframe.reset_index(drop=True)
         self.dataset_root = Path(dataset_root)
@@ -93,7 +93,8 @@ class NoduleRegressionDataset(Dataset):
         return image, targets
 
     def _load_and_crop(self, row: pd.Series) -> torch.Tensor:
-        image_path = self.dataset_root / row[DatasetConstants.IMAGE_PATH]
+        image_rel = str(row[DatasetConstants.IMAGE_PATH]).replace("\\", "/")
+        image_path = self.dataset_root / image_rel
         full_image = Image.open(image_path).convert("RGB")
 
         cropped = self._crop_nodule(full_image, row)
@@ -151,7 +152,6 @@ class RegressionDataModule(L.LightningDataModule):
         self.pin_memory = pin_memory
         
         self.target_scaler = target_scaler if target_scaler is not None else StandardScaler()
-
         self.train_dataset = None
         self.val_dataset = None
         self.test_dataset = None
@@ -170,9 +170,10 @@ class RegressionDataModule(L.LightningDataModule):
 
         split_map = {model_stage : df[df[DatasetConstants.SPLIT_GROUP] == model_stage ]
                      for model_stage in ModelStage}
-        
-        train_targets = split_map[ModelStage.TRAIN][self.target_features].values
-        self.target_scaler.fit(train_targets)
+
+        if self.target_scaler:
+            train_targets = split_map[ModelStage.TRAIN][self.target_features].values
+            self.target_scaler.fit(train_targets)
 
         self._log_split_stats(split_map)
 
