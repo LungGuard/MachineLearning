@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Tuple, Optional
 from dataclasses import dataclass
 import numpy as np
-import cv2
+from PIL import Image as PILImage
 
 logger = logging.getLogger(__name__)
 
@@ -21,12 +21,12 @@ class AtomicSaveResult:
 
 def save_image(image: np.ndarray, image_path: Path) -> bool:
     """
-    Save image to disk.
+    Save image to disk preserving channel order as-is (no BGR conversion).
     Returns Saving result
     """
     try:
-        image_bgr = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
-        return cv2.imwrite(str(image_path), image_bgr)
+        PILImage.fromarray(image.astype(np.uint8)).save(str(image_path), quality=95)
+        return True
     except Exception as e:
         logger.error(f"Image save failed: {e}")
         return False

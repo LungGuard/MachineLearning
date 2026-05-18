@@ -142,9 +142,10 @@ class NoduleAnnotationProcessor:
 
         for ann in annotations:
             try:
-                centroid = ann.centroid  # Returns (z, y, x) in original space
+                centroid = ann.centroid  # pylidc returns (i, j, k) = (row, col, slice)
                 if centroid is not None and len(centroid) == 3:
-                    centroids.append(centroid)
+                    # Reorder to (slice, row, col) = (z, y, x) to match the transposed volume.
+                    centroids.append((centroid[2], centroid[0], centroid[1]))
             except (AttributeError, TypeError, ValueError) as e:
                 logger.warning(f"Annotation centroid extraction failed: {e}")
 

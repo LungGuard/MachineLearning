@@ -38,6 +38,7 @@ class AnalysisThresholds:
     too_dark_ratio: float = 0.88
     too_bright_mean: float = 180.0
     min_dark_ratio: float = 0.20
+    dark_threshold: int = 65
     min_contrast_range: int = 100
 
     # Lung content
@@ -500,8 +501,8 @@ class DatasetDiagnoser:
         min_val = int(gray.min())
         max_val = int(gray.max())
 
-        dark = int(np.sum(gray < 50))
-        mid = int(np.sum((gray >= 50) & (gray <= 200)))
+        dark = int(np.sum(gray < t.dark_threshold))
+        mid = int(np.sum((gray >= t.dark_threshold) & (gray <= 200)))
         bright = int(np.sum(gray > 200))
 
         dark_ratio = dark / total

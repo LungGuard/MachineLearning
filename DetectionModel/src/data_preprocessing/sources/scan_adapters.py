@@ -30,6 +30,9 @@ class PyLIDCScanSource:
     def load_volume(self) -> Optional[VolumeData]:
         try:
             raw_volume = self._scan.to_volume()
+            # pylidc stacks slices on axis=-1: shape is (N_rows, N_cols, N_slices).
+            # The pipeline expects (N_slices, N_rows, N_cols) = (z, y, x).
+            raw_volume = np.transpose(raw_volume, (2, 0, 1))
             spacing = self._extract_spacing()
             result = VolumeData(volume=raw_volume, spacing=spacing) if spacing is not None else None
         except Exception as e:

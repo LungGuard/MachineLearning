@@ -38,7 +38,7 @@ class SliceQualityConfig:
     min_contrast_range: int = 80
     max_mean_brightness: float = 180.0
     min_dark_ratio: float = 0.20
-    dark_threshold: int = 50
+    dark_threshold: int = 65
     clahe_clip_limit: float = 2.5
     clahe_grid_size: Tuple[int, int] = (8, 8)
 

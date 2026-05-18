@@ -154,17 +154,29 @@ class MainPipeline:
     def _resize_regression_crops(
         self, detected_nodules: list[DetectedNodule]
     ) -> torch.Tensor:
-        target_size = self.inference_constants.REGRESSION_INPUT_SIZE
-        crops = [
-            F.interpolate(
-                detected.regression_input.unsqueeze(0).float(),
-                size=target_size,
-                mode="bilinear",
-                align_corners=False,
-            ).squeeze(0)
-            for detected in detected_nodules
-        ]
-        return torch.stack(crops)
+        target = self.inference_constants.REGRESSION_INPUT_SIZE[0]
+        return torch.stack([
+            self._aspect_preserving_resize(dn.regression_input.float(), target)
+            for dn in detected_nodules
+        ])
+
+    @staticmethod
+    def _aspect_preserving_resize(crop: torch.Tensor, target: int) -> torch.Tensor:
+        _, h, w = crop.shape
+        scale = target / max(h, w)
+        new_h = max(1, int(h * scale))
+        new_w = max(1, int(w * scale))
+        resized = F.interpolate(
+            crop.unsqueeze(0), size=(new_h, new_w),
+            mode="bilinear", align_corners=False,
+        ).squeeze(0)
+        pad_h = target - new_h
+        pad_w = target - new_w
+        pad_top    = pad_h // 2
+        pad_bottom = pad_h - pad_top
+        pad_left   = pad_w // 2
+        pad_right  = pad_w - pad_left
+        return F.pad(resized, (pad_left, pad_right, pad_top, pad_bottom), value=0.0)
 
     def _build_nodule_dto(
         self, detected: DetectedNodule, features: NoduleFeatures

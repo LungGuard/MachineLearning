@@ -7,7 +7,6 @@ from pathlib import Path
 from PIL import Image
 from torchvision import transforms
 import logging
-from sklearn.preprocessing import StandardScaler
 
 from DetectionModel.constants.enums.features import Features
 from DetectionModel.constants.enums.bbox import BBOX
@@ -48,7 +47,6 @@ class NoduleRegressionDataset(Dataset):
         target_features: list[str],
         crop_size: int = DatasetConstants.DEFAULT_CROP_SIZE,
         augment: bool = False,
-        target_scaler = StandardScaler() 
     ):
         self.dataframe = dataframe.reset_index(drop=True)
         self.dataset_root = Path(dataset_root)
@@ -57,14 +55,24 @@ class NoduleRegressionDataset(Dataset):
 
         self.crop_transform = AspectRatioPreservingResize(crop_size)
         self.transform_values = TransformValues()
-        
-        self.target_scaler = target_scaler
-        
-        self.augment_transform = transforms.Compose([
-            transforms.RandomHorizontalFlip(p=self.transform_values.horizontal_flip_probability),
-            transforms.RandomRotation(degrees=self.transform_values.rotate_angle_range),
-            transforms.RandomVerticalFlip(p=self.transform_values.vertical_flip_probability)
-        ]) if augment else None
+
+        if augment:
+            self.augment_transform = transforms.Compose([
+                transforms.RandomHorizontalFlip(p=self.transform_values.horizontal_flip_probability),
+                transforms.RandomVerticalFlip(p=self.transform_values.vertical_flip_probability),
+                transforms.RandomRotation(degrees=self.transform_values.rotate_angle_range),
+                transforms.ColorJitter(
+                    brightness=self.transform_values.brightness_factor,
+                    contrast=self.transform_values.contrast_factor,
+                ),
+                transforms.RandomAffine(degrees=0, translate=(0.05, 0.05)),
+                transforms.GaussianBlur(kernel_size=3, sigma=(0.1, 1.5)),
+            ])
+            # RandomErasing is applied after to_tensor (operates on tensors)
+            self.tensor_augment = transforms.RandomErasing(p=0.2, scale=(0.02, 0.1))
+        else:
+            self.augment_transform = None
+            self.tensor_augment = None
 
         self.to_tensor = transforms.ToTensor()
 
@@ -79,17 +87,11 @@ class NoduleRegressionDataset(Dataset):
 
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor]:
         row = self.dataframe.iloc[idx]
-
         image = self._load_and_crop(row)
-        
-        raw_targets = row[self.target_features].values.astype(np.float32)
-        
-        if self.target_scaler:
-            # sklearn scalers expect 2D arrays (samples, features), so we reshape
-            raw_targets = self.target_scaler.transform(raw_targets.reshape(1, -1))[0]
-
-        targets = torch.tensor(raw_targets, dtype=torch.float32)
-
+        targets = torch.tensor(
+            row[self.target_features].values.astype(np.float32),
+            dtype=torch.float32,
+        )
         return image, targets
 
     def _load_and_crop(self, row: pd.Series) -> torch.Tensor:
@@ -103,7 +105,10 @@ class NoduleRegressionDataset(Dataset):
         if self.augment_transform is not None:
             resized = self.augment_transform(resized)
 
-        return self.to_tensor(resized)
+        tensor = self.to_tensor(resized)
+        if self.tensor_augment is not None:
+            tensor = self.tensor_augment(tensor)
+        return tensor
 
     def _crop_nodule(self, image: Image.Image, row: pd.Series,
                      margin_factor=DatasetConstants.MARGIN_FACTOR,
@@ -138,7 +143,6 @@ class RegressionDataModule(L.LightningDataModule):
         batch_size: int = 32,
         num_workers: int = 4,
         pin_memory: bool = True,
-        target_scaler = None 
     ):
         super().__init__()
         self.save_hyperparameters(ignore=[HyperParameters.TARGET_FEATURES])
@@ -150,8 +154,6 @@ class RegressionDataModule(L.LightningDataModule):
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.pin_memory = pin_memory
-        
-        self.target_scaler = target_scaler if target_scaler is not None else StandardScaler()
         self.train_dataset = None
         self.val_dataset = None
         self.test_dataset = None
@@ -168,12 +170,8 @@ class RegressionDataModule(L.LightningDataModule):
         df = pd.read_csv(self.metadata_csv)
         self._validate_dataframe(df)
 
-        split_map = {model_stage : df[df[DatasetConstants.SPLIT_GROUP] == model_stage ]
+        split_map = {model_stage: df[df[DatasetConstants.SPLIT_GROUP] == model_stage]
                      for model_stage in ModelStage}
-
-        if self.target_scaler:
-            train_targets = split_map[ModelStage.TRAIN][self.target_features].values
-            self.target_scaler.fit(train_targets)
 
         self._log_split_stats(split_map)
 
@@ -186,7 +184,6 @@ class RegressionDataModule(L.LightningDataModule):
                 target_features=self.target_features,
                 crop_size=self.crop_size,
                 augment=augment,
-                target_scaler=self.target_scaler 
             )
             setattr(self, f"{split_name}_dataset", dataset)
 
