@@ -27,7 +27,7 @@ class ProjectPaths:
     LOGS_DIR = ROOT / "logs"
 
     DETECTION_ROOT = ROOT / "DetectionModel"
-    DETECTION_DATASETS_DIR = DETECTION_ROOT / "datasets_clean_v2"
+    DETECTION_DATASETS_DIR = DETECTION_ROOT / "datasets_v4"
     DETECTION_DATASET_YAML = DETECTION_DATASETS_DIR / "dataset.yaml"
     DETECTION_METADATA_CSV = DETECTION_DATASETS_DIR / "metadata" / "regression_dataset.csv"
     DETECTION_CHECKPOINT_DIR = DETECTION_ROOT / "src" / "model_checkpoints"

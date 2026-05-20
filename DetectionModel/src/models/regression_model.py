@@ -26,23 +26,26 @@ class NoduleFeaturesModel(L.LightningModule,ModelMixin):
                  conv_layers_channels : Union[list[int],tuple[int]] = (32,64,128),
                  dense_layers_channels : Union[list[int],tuple[int]] =(128, 64),
                  weight_decay: float = None,
+                 dropout_p: float = 0.3,
                  loss_fn = nn.MSELoss()):
         super(NoduleFeaturesModel, self).__init__()
 
         self.save_hyperparameters(ignore=[HyperParameters.METRICS,
-                                          HyperParameters.LAYERS
+                                          HyperParameters.LAYERS,
+                                          'loss_fn',
                                           ])
 
         self.input_shape = input_shape
         self.channels, self.height, self.width = input_shape
         self.learning_rate = learning_rate
-        self.weight_decay=weight_decay
+        self.weight_decay = weight_decay
+        self.dropout_p = dropout_p
 
         self.feature_extractor = nn.Sequential()
         self.regressor = nn.Sequential()
-        
+
         self.loss_fn = loss_fn
-        
+
         self._build_model(conv_layers=conv_layers_channels,
                           dense_layers=dense_layers_channels)
         self._setup_metrics(metrics)
@@ -51,7 +54,7 @@ class NoduleFeaturesModel(L.LightningModule,ModelMixin):
         return MetricCollection({
             Metrics.RMSE: torchmetrics.MeanSquaredError(squared=False),
             Metrics.MAE: torchmetrics.MeanAbsoluteError(),
-            Metrics.R2: torchmetrics.R2Score(len(TAGRET_FEATURES)),
+            Metrics.R2: torchmetrics.R2Score(multioutput='variance_weighted'),
         })
 
     def _build_model(self,conv_layers,dense_layers):
@@ -75,10 +78,11 @@ class NoduleFeaturesModel(L.LightningModule,ModelMixin):
         block_class=DenseBlock,
         )
 
-        self.regressor.add_module(
-                                  RegressionModelConstants.OUTPUT_LAYER_NAME,
-                                  nn.Linear(64, len(TAGRET_FEATURES))
-                                  ) 
+        last_dense_size = dense_layers[-1]
+        self._add_multiple_layers(target=self.regressor, layers=[
+            ('pre_output_dropout', nn.Dropout(p=self.dropout_p)),
+            (RegressionModelConstants.OUTPUT_LAYER_NAME, nn.Linear(last_dense_size, len(TAGRET_FEATURES))),
+        ])
 
     def forward(self, x):
         features = self.feature_extractor(x)
@@ -113,29 +117,27 @@ class NoduleFeaturesModel(L.LightningModule,ModelMixin):
         return loss
 
     def configure_optimizers(self):
-            if self.weight_decay:
-                optimizer = torch.optim.Adam(self.parameters(),
-                                         lr=self.learning_rate,
-                                         weight_decay=self.weight_decay)
-            else:
-                optimizer = torch.optim.Adam(self.parameters(),
-                                         lr=self.learning_rate)
-            scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-                optimizer, 
-                mode='min', 
-                factor=0.1, 
-                patience=5, 
-            )
-            
-            return {
-                "optimizer": optimizer,
-                "lr_scheduler": {
-                    "scheduler": scheduler,
-                    "monitor": Loss.DEFAULT.get_variant(ModelStage.VAL), 
-                    "interval": "epoch",
-                    "frequency": 1,
-                },
-            }
+        wd = self.weight_decay if self.weight_decay is not None else 0.0
+        optimizer = torch.optim.Adam(self.parameters(),
+                                     lr=self.learning_rate,
+                                     weight_decay=wd)
+        plat_patience = getattr(self, '_plat_patience', 8)
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer,
+            mode='min',
+            factor=0.5,
+            patience=plat_patience,
+        )
+
+        return {
+            "optimizer": optimizer,
+            "lr_scheduler": {
+                "scheduler": scheduler,
+                "monitor": Loss.DEFAULT.get_variant(ModelStage.VAL),
+                "interval": "epoch",
+                "frequency": 1,
+            },
+        }
     def predict_features(self, x):
         was_training = self.training
         self.eval()

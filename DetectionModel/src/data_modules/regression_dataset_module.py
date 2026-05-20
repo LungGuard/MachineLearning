@@ -5,6 +5,7 @@ import pandas as pd
 import numpy as np
 from pathlib import Path
 from PIL import Image
+from sklearn.preprocessing import StandardScaler
 from torchvision import transforms
 import logging
 
@@ -47,11 +48,13 @@ class NoduleRegressionDataset(Dataset):
         target_features: list[str],
         crop_size: int = DatasetConstants.DEFAULT_CROP_SIZE,
         augment: bool = False,
+        target_scaler: StandardScaler = None,
     ):
         self.dataframe = dataframe.reset_index(drop=True)
         self.dataset_root = Path(dataset_root)
         self.target_features = target_features
         self.crop_size = crop_size
+        self.target_scaler = target_scaler
 
         self.crop_transform = AspectRatioPreservingResize(crop_size)
         self.transform_values = TransformValues()
@@ -88,10 +91,10 @@ class NoduleRegressionDataset(Dataset):
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor]:
         row = self.dataframe.iloc[idx]
         image = self._load_and_crop(row)
-        targets = torch.tensor(
-            row[self.target_features].values.astype(np.float32),
-            dtype=torch.float32,
-        )
+        raw_targets = row[self.target_features].values.astype(np.float32).reshape(1, -1)
+        if self.target_scaler is not None:
+            raw_targets = self.target_scaler.transform(raw_targets).astype(np.float32)
+        targets = torch.tensor(raw_targets.squeeze(0), dtype=torch.float32)
         return image, targets
 
     def _load_and_crop(self, row: pd.Series) -> torch.Tensor:
@@ -143,6 +146,8 @@ class RegressionDataModule(L.LightningDataModule):
         batch_size: int = 32,
         num_workers: int = 4,
         pin_memory: bool = True,
+        augment_train = False,
+        scale_targets: bool = True,
     ):
         super().__init__()
         self.save_hyperparameters(ignore=[HyperParameters.TARGET_FEATURES])
@@ -157,6 +162,9 @@ class RegressionDataModule(L.LightningDataModule):
         self.train_dataset = None
         self.val_dataset = None
         self.test_dataset = None
+        self.augment_train = augment_train
+        self.scale_targets = scale_targets
+        self.target_scaler: StandardScaler = None
 
     @property
     def num_targets(self) -> int:
@@ -175,15 +183,33 @@ class RegressionDataModule(L.LightningDataModule):
 
         self._log_split_stats(split_map)
 
+        if self.scale_targets and self.target_scaler is None:
+            train_targets = split_map[ModelStage.TRAIN][self.target_features].values.astype(np.float32)
+            self.target_scaler = StandardScaler()
+            self.target_scaler.fit(train_targets)
+            # Cap scale_ for near-constant features so StandardScaler does not
+            # artificially inflate their noise.  Any feature whose training std
+            # is below the median std is clamped to the median std, which keeps
+            # near-constant features (internal_structure std≈0.17) in the same
+            # numerical neighbourhood as the rest instead of blowing up to 1.
+            median_scale = float(np.median(self.target_scaler.scale_))
+            self.target_scaler.scale_ = np.maximum(self.target_scaler.scale_, median_scale)
+            logger.info(
+                f"StandardScaler fitted on {len(train_targets)} training samples "
+                f"(low-variance features clamped to median scale={median_scale:.3f}). "
+                f"Feature means: {dict(zip(self.target_features, self.target_scaler.mean_.round(3)))}"
+            )
+
         splits_needed = self._resolve_splits(stage)
         for split_name in splits_needed:
-            augment = (split_name == ModelStage.TRAIN)
+            augment = self.augment_train and (split_name == ModelStage.TRAIN)
             dataset = NoduleRegressionDataset(
                 dataframe=split_map[split_name],
                 dataset_root=self.dataset_root,
                 target_features=self.target_features,
                 crop_size=self.crop_size,
                 augment=augment,
+                target_scaler=self.target_scaler,
             )
             setattr(self, f"{split_name}_dataset", dataset)
 
