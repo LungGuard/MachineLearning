@@ -190,7 +190,7 @@ class RegressionDataModule(L.LightningDataModule):
             # Cap scale_ for near-constant features so StandardScaler does not
             # artificially inflate their noise.  Any feature whose training std
             # is below the median std is clamped to the median std, which keeps
-            # near-constant features (internal_structure std≈0.17) in the same
+            # near-constant features (internal_structure std≈0.17) ihe same
             # numerical neighbourhood as the rest instead of blowing up to 1.
             median_scale = float(np.median(self.target_scaler.scale_))
             self.target_scaler.scale_ = np.maximum(self.target_scaler.scale_, median_scale)

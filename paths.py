@@ -39,3 +39,12 @@ class ProjectPaths:
     CLASSIFICATION_UNIFIED_DIR = CLASSIFICATION_DATASETS_DIR / "unified_dataset_v2"
     CLASSIFICATION_CHECKPOINT_DIR = CLASSIFICATION_ROOT / "testing" / "Checkpoints"
     CLASSIFICATION_RESULTS_DIR = CLASSIFICATION_ROOT / "testing" / "results"
+
+    DETECTION_BEST_WEIGHTS = (
+        DETECTION_CHECKPOINT_DIR
+        / "ilay-detection_model-finetuned_v4"
+        / "weights"
+        / "best.pt"
+    )
+    REGRESSION_BEST_CHECKPOINT = DETECTION_CHECKPOINT_DIR / "best_reg_model.ckpt"
+    CLASSIFICATION_BEST_CHECKPOINT = CLASSIFICATION_CHECKPOINT_DIR / "best_model.keras"

@@ -11,6 +11,11 @@ from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, Field
 from pydantic import HttpUrl
 
+from ClassificationModel.constants.constants.dataset import DatasetConstants
+from ClassificationModel.constants.enums.cancer_type import CancerType
+from ClassificationModel.src.models.classification_model import CancerClassificationModel
+from DetectionModel.src.models.detection_model import NodulesDetectionModel
+from DetectionModel.src.models.efficientnet_nodule_model import EfficientNetNoduleModel
 from common.constants import (
     ApiConstants,
     DownloadLimits,
@@ -25,6 +30,7 @@ from middleware.actuator import build_actuator_router
 from middleware.eureka_config import deregister_eureka, register_eureka
 from middleware.gateway_auth import GatewayAuthMiddleware
 from middleware.middleware_config import EurekaConfig
+from paths import ProjectPaths
 from pipeline import MainPipeline
 
 configure_logging()
@@ -42,12 +48,34 @@ DOWNLOAD_TIMEOUT = httpx.Timeout(
 
 _pipeline: Optional[MainPipeline] = None
 
+_CLASSIFICATION_CLASS_NAMES: list[str] = sorted(t.value for t in CancerType)
+
 
 def _build_pipeline() -> MainPipeline:
-    raise NotImplementedError(
-        "MainPipeline model wiring is not set up. Construct MainPipeline with "
-        "concrete detection_model / regression_model / classification_model "
-        "instances here."
+    detection_model = NodulesDetectionModel(
+        pretrained_weights=str(ProjectPaths.DETECTION_BEST_WEIGHTS),
+    )
+    detection_model.eval()
+
+    regression_model = EfficientNetNoduleModel.load_from_checkpoint(
+        ProjectPaths.REGRESSION_BEST_CHECKPOINT,
+        map_location="cpu",
+    )
+    regression_model.eval()
+
+    classification_model = CancerClassificationModel(
+        dataset={
+            DatasetConstants.NUM_CLASSES_KEY: len(_CLASSIFICATION_CLASS_NAMES),
+            DatasetConstants.CLASS_NAMES_KEY: _CLASSIFICATION_CLASS_NAMES,
+        },
+        input_shape=(*DatasetConstants.IMAGE_SIZE, DatasetConstants.CHANNELS),
+        checkpoint_path=ProjectPaths.CLASSIFICATION_BEST_CHECKPOINT,
+    )
+
+    return MainPipeline(
+        detection_model=detection_model,
+        regression_model=regression_model,
+        classification_model=classification_model,
     )
 
 

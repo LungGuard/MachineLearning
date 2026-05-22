@@ -13,6 +13,7 @@ from common.constants.metrics import Metrics
 from common.constants.model_stages import ModelStage
 from common.mixins import ModelMixin
 from common.constants import HyperParameters, Loss
+import torchvision.transforms.functional as TF
 
 TARGET_FEATURES = Features.getNoduleFeaturesVector()
 
@@ -185,7 +186,6 @@ class EfficientNetNoduleModel(L.LightningModule, ModelMixin):
             x:   Input tensor (B, C, H, W) — already normalised.
             tta: If True, average over augmented views (recommended for inference).
         """
-        import torchvision.transforms.functional as TF
 
         was_training = self.training
         self.eval()
