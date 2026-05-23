@@ -148,21 +148,24 @@ class MainPipeline:
     def _predict_nodule_features(
         self, detection_results: list[SliceDetectionResult]
     ) -> list[Nodule]:
-        all_nodules: list[DetectedNodule] = [
-            nodule
+        # Pair each nodule with its parent slice's middle-channel image so we
+        # can encode the full slice (with bbox) instead of just the crop.
+        nodule_slice_pairs: list[tuple[DetectedNodule, np.ndarray]] = [
+            (nodule, result.classifier_input.squeeze(0).numpy())
             for result in detection_results
             for nodule in result.nodules
         ]
 
-        if not all_nodules:
+        if not nodule_slice_pairs:
             return []
 
+        all_nodules = [pair[0] for pair in nodule_slice_pairs]
         crop_batch = self._resize_regression_crops(all_nodules)
         features_list = self.regression_model.predict_features(crop_batch)
 
         return [
-            self._build_nodule_dto(detected, features)
-            for detected, features in zip(all_nodules, features_list)
+            self._build_nodule_dto(detected, features, slice_img)
+            for (detected, slice_img), features in zip(nodule_slice_pairs, features_list)
         ]
 
     def _resize_regression_crops(
@@ -193,7 +196,7 @@ class MainPipeline:
         return F.pad(resized, (pad_left, pad_right, pad_top, pad_bottom), value=0.0)
 
     def _build_nodule_dto(
-        self, detected: DetectedNodule, features: NoduleFeatures
+        self, detected: DetectedNodule, features: NoduleFeatures, slice_img: np.ndarray
     ) -> Nodule:
         return Nodule(
             nodule_id=uuid.uuid4().hex[:8],
@@ -205,7 +208,7 @@ class MainPipeline:
             ),
             confidence=detected.confidence,
             nodule_features=features,
-            nodule_image=self._encode_nodule_image(detected.regression_input),
+            nodule_image=self._encode_slice_with_bbox(slice_img, detected),
         )
 
     def _should_classify(self, nodules: list[Nodule]) -> bool:
@@ -239,10 +242,25 @@ class MainPipeline:
             return None
 
     @staticmethod
-    def _encode_nodule_image(crop_tensor: torch.Tensor) -> str:
-        middle = crop_tensor[1].numpy()
-        img_uint8 = (middle * 255).clip(0, 255).astype(np.uint8)
-        _, encoded = cv2.imencode(".png", img_uint8)
+    def _encode_slice_with_bbox(slice_img: np.ndarray, detected: DetectedNodule) -> str:
+        """Encode the full CT slice as PNG with the nodule bounding box drawn on it.
+
+        Args:
+            slice_img: (H, W) float32 array in [0, 1] — middle channel of the 2.5D sandwich.
+            detected:  nodule whose bbox coordinates are in absolute pixels of slice_img.
+        """
+        img_uint8 = (slice_img * 255).clip(0, 255).astype(np.uint8)
+        img_bgr = cv2.cvtColor(img_uint8, cv2.COLOR_GRAY2BGR)
+
+        h, w = img_bgr.shape[:2]
+        x1 = max(0, int(detected.x - detected.w / 2))
+        y1 = max(0, int(detected.y - detected.h / 2))
+        x2 = min(w - 1, int(detected.x + detected.w / 2))
+        y2 = min(h - 1, int(detected.y + detected.h / 2))
+
+        cv2.rectangle(img_bgr, (x1, y1), (x2, y2), (0, 255, 0), 2)
+
+        _, encoded = cv2.imencode(".png", img_bgr)
         return base64.b64encode(encoded).decode("utf-8")
 
     @staticmethod
