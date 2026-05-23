@@ -1,9 +1,23 @@
+import functools
 import logging
 import tempfile
 import zipfile
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional
+
+import torch as _torch
+
+_orig_torch_load = _torch.load
+
+
+@functools.wraps(_orig_torch_load)
+def _patched_torch_load(*args, **kwargs):
+    kwargs["weights_only"] = False
+    return _orig_torch_load(*args, **kwargs)
+
+
+_torch.load = _patched_torch_load
 
 import httpx
 from fastapi import FastAPI, HTTPException
@@ -60,6 +74,7 @@ def _build_pipeline() -> MainPipeline:
     regression_model = EfficientNetNoduleModel.load_from_checkpoint(
         ProjectPaths.REGRESSION_BEST_CHECKPOINT,
         map_location="cpu",
+        strict=False,
     )
     regression_model.eval()
 

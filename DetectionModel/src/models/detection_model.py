@@ -4,8 +4,9 @@ import lightning as L
 import torch
 import torch.optim as optim
 from ultralytics.nn.tasks import DetectionModel
+from ultralytics.utils import DEFAULT_CFG
 from ultralytics.utils.loss import v8DetectionLoss
-from ultralytics.utils.ops import non_max_suppression
+from ultralytics.utils.nms import non_max_suppression
 
 from DetectionModel.constants.constants.detection_model import DetectionModelConstants
 from DetectionModel.src.data_preprocessing.core.scan_protocols import (
@@ -32,6 +33,7 @@ class NodulesDetectionModel(L.LightningModule):
         if pretrained_weights:
             self._load_weights(pretrained_weights)
 
+        self.model.args = DEFAULT_CFG
         self.loss_fn = v8DetectionLoss(self.model)
 
     def _load_weights(self, weights_path):

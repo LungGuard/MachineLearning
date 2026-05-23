@@ -115,11 +115,25 @@ class MainPipeline:
             logger.warning(f"[{patient_id}] No slices passed quality gate")
             return []
 
-        batch = self._build_yolo_batch(processed_slices)
+        batch_size = self.inference_constants.YOLO_INFERENCE_BATCH_SIZE
+        all_results: list[SliceDetectionResult] = []
 
         with torch.inference_mode():
             self.detection_model.eval()
-            return self.detection_model.predict_step((batch, None), batch_idx=0)
+            for batch_idx, start in enumerate(range(0, len(processed_slices), batch_size)):
+                chunk = processed_slices[start:start + batch_size]
+                batch = self._build_yolo_batch(chunk)
+                chunk_results = self.detection_model.predict_step(
+                    (batch, None), batch_idx=batch_idx
+                )
+                all_results.extend(chunk_results)
+                logger.debug(
+                    f"[{patient_id}] YOLO mini-batch {batch_idx} "
+                    f"({len(chunk)} slices): "
+                    f"{sum(len(r.nodules) for r in chunk_results)} detection(s)"
+                )
+
+        return all_results
 
     def _build_yolo_batch(self, processed_slices) -> torch.Tensor:
         normalizer = self.inference_constants.YOLO_PIXEL_NORMALIZER
