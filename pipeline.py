@@ -71,7 +71,7 @@ class MainPipeline:
         preprocessed_volume = preprocess_result[0]
 
         detection_results = self._detect_nodules(preprocessed_volume, patient_id)
-        nodules = self._predict_nodule_features(detection_results)
+        nodules = self._predict_nodule_features(detection_results, patient_id)
 
         cancer_class: Optional[CancerClass] = None
         if self._should_classify(nodules):
@@ -146,10 +146,10 @@ class MainPipeline:
         return torch.stack(tensors)
 
     def _predict_nodule_features(
-        self, detection_results: list[SliceDetectionResult]
+        self, detection_results: list[SliceDetectionResult], patient_id: str = ""
     ) -> list[Nodule]:
         # Pair each nodule with its parent slice's middle-channel image so we
-        # can encode the full slice (with bbox) instead of just the crop.
+        # can encode the slice (with bbox) instead of just the crop.
         nodule_slice_pairs: list[tuple[DetectedNodule, np.ndarray]] = [
             (nodule, result.classifier_input.squeeze(0).numpy())
             for result in detection_results
@@ -158,6 +158,9 @@ class MainPipeline:
 
         if not nodule_slice_pairs:
             return []
+
+        # Remove cross-slice duplicates: same physical nodule visible in adjacent slices.
+        nodule_slice_pairs = self._cross_slice_nms(nodule_slice_pairs, patient_id=patient_id)
 
         all_nodules = [pair[0] for pair in nodule_slice_pairs]
         crop_batch = self._resize_regression_crops(all_nodules)
@@ -243,25 +246,128 @@ class MainPipeline:
 
     @staticmethod
     def _encode_slice_with_bbox(slice_img: np.ndarray, detected: DetectedNodule) -> str:
-        """Encode the full CT slice as PNG with the nodule bounding box drawn on it.
+        """Encode a context-cropped CT region as PNG with the nodule bounding box.
+
+        The 2.5D sandwich used as YOLO input may have black zero-padding baked in
+        (from center_crop_slice clamping MAX_CROP_SCALE).  We first detect the actual
+        non-zero content bounds and restrict the crop to that region, so no artificial
+        black columns bleed into the final image.
 
         Args:
             slice_img: (H, W) float32 array in [0, 1] — middle channel of the 2.5D sandwich.
             detected:  nodule whose bbox coordinates are in absolute pixels of slice_img.
         """
+        _DISPLAY_MARGIN_FACTOR = 3.0   # context padding = 3× the bbox dimension on each side
+        _DISPLAY_MIN_CONTEXT_MARGIN_PX = 80   # minimum margin in pixels regardless of bbox size
+        _DISPLAY_OUTPUT_SIZE = 512     
+
         img_uint8 = (slice_img * 255).clip(0, 255).astype(np.uint8)
         img_bgr = cv2.cvtColor(img_uint8, cv2.COLOR_GRAY2BGR)
 
         h, w = img_bgr.shape[:2]
-        x1 = max(0, int(detected.x - detected.w / 2))
-        y1 = max(0, int(detected.y - detected.h / 2))
-        x2 = min(w - 1, int(detected.x + detected.w / 2))
-        y2 = min(h - 1, int(detected.y + detected.h / 2))
+
+        # Detect the non-zero content bbox so that zero-padding columns baked in by
+        # center_crop_slice (when MAX_CROP_SCALE clamps the upscale) are excluded.
+        content_ys, content_xs = np.where(slice_img > 1e-6)
+        if content_ys.size > 0:
+            cy1, cy2 = int(content_ys.min()), int(content_ys.max())
+            cx1, cx2 = int(content_xs.min()), int(content_xs.max())
+        else:
+            cy1, cy2, cx1, cx2 = 0, h, 0, w   # degenerate guard: all-zero slice
+
+        x1 = max(cx1, int(detected.x - detected.w / 2))
+        y1 = max(cy1, int(detected.y - detected.h / 2))
+        x2 = min(cx2, int(detected.x + detected.w / 2))
+        y2 = min(cy2, int(detected.y + detected.h / 2))
 
         cv2.rectangle(img_bgr, (x1, y1), (x2, y2), (0, 255, 0), 2)
 
-        _, encoded = cv2.imencode(".png", img_bgr)
+        # Crop a context region around the nodule, clamped to content bounds.
+        margin_x = max(int((x2 - x1) * _DISPLAY_MARGIN_FACTOR), _DISPLAY_MIN_CONTEXT_MARGIN_PX)
+        margin_y = max(int((y2 - y1) * _DISPLAY_MARGIN_FACTOR), _DISPLAY_MIN_CONTEXT_MARGIN_PX)
+        crop_x1 = max(cx1, x1 - margin_x)
+        crop_y1 = max(cy1, y1 - margin_y)
+        crop_x2 = min(cx2, x2 + margin_x)
+        crop_y2 = min(cy2, y2 + margin_y)
+
+        # Force the crop to be square by expanding the shorter side within content bounds.
+        crop_w = crop_x2 - crop_x1
+        crop_h = crop_y2 - crop_y1
+        if crop_w > crop_h:
+            expand = crop_w - crop_h
+            crop_y1 = max(cy1, crop_y1 - expand // 2)
+            crop_y2 = min(cy2, crop_y1 + crop_w)
+        elif crop_h > crop_w:
+            expand = crop_h - crop_w
+            crop_x1 = max(cx1, crop_x1 - expand // 2)
+            crop_x2 = min(cx2, crop_x1 + crop_h)
+
+        crop = img_bgr[crop_y1:crop_y2, crop_x1:crop_x2]
+
+        # Direct resize to output size — crop is square so no padding needed.
+        output = cv2.resize(crop, (_DISPLAY_OUTPUT_SIZE, _DISPLAY_OUTPUT_SIZE),
+                            interpolation=cv2.INTER_LINEAR)
+
+        _, encoded = cv2.imencode(".png", output)
         return base64.b64encode(encoded).decode("utf-8")
+
+    @staticmethod
+    def _cross_slice_nms(
+        pairs: list[tuple[DetectedNodule, np.ndarray]],
+        patient_id: str = "",
+        iomin_threshold: float = 0.5,
+    ) -> list[tuple[DetectedNodule, np.ndarray]]:
+        """Suppress cross-slice duplicates — same nodule detected in adjacent slices.
+
+        Uses IoMin (intersection-over-min-area) ORed with a center-distance gate so
+        that partial-volume end-slices (whose 2D bbox shrinks substantially relative to
+        the middle slice) are still correctly merged with the main detection.
+
+        Sorting by confidence descending ensures we keep the best detection of each lesion.
+        """
+        sorted_pairs = sorted(pairs, key=lambda p: p[0].confidence, reverse=True)
+        kept: list[tuple[DetectedNodule, np.ndarray]] = []
+        for nodule, img in sorted_pairs:
+            if not any(
+                MainPipeline._same_lesion(nodule, kept_nodule, iomin_threshold)
+                for kept_nodule, _ in kept
+            ):
+                kept.append((nodule, img))
+
+        logger.info(
+            "[%s] Cross-slice NMS: %d raw detections → %d unique nodules",
+            patient_id, len(pairs), len(kept),
+        )
+        return kept
+
+    @staticmethod
+    def _same_lesion(
+        a: DetectedNodule, b: DetectedNodule, iomin_threshold: float
+    ) -> bool:
+        """True when two detections most likely represent the same physical nodule.
+
+        Merges on IoMin ≥ iomin_threshold (robust to partial-volume size shrinkage)
+        OR center distance < 0.5 × larger diameter (spatial proximity gate).
+        Both pixel coords and distances are in mm because target_spacing = (1,1,1).
+        """
+        ax1, ay1 = a.x - a.w / 2, a.y - a.h / 2
+        ax2, ay2 = a.x + a.w / 2, a.y + a.h / 2
+        bx1, by1 = b.x - b.w / 2, b.y - b.h / 2
+        bx2, by2 = b.x + b.w / 2, b.y + b.h / 2
+
+        ix1, iy1 = max(ax1, bx1), max(ay1, by1)
+        ix2, iy2 = min(ax2, bx2), min(ay2, by2)
+
+        if ix2 > ix1 and iy2 > iy1:
+            intersection = (ix2 - ix1) * (iy2 - iy1)
+            min_area = min(a.w * a.h, b.w * b.h)
+            if min_area > 0 and intersection / min_area >= iomin_threshold:
+                return True
+
+        # Center-distance gate: merge if centroids are within half the larger nodule's diameter.
+        dist = ((a.x - b.x) ** 2 + (a.y - b.y) ** 2) ** 0.5
+        larger_diameter = max(max(a.w, a.h), max(b.w, b.h))
+        return dist < 0.5 * larger_diameter
 
     @staticmethod
     def _build_results(nodules: list[Nodule],
