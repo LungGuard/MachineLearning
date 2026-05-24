@@ -87,11 +87,23 @@ class PyLIDCScanSource:
 
 
 class DICOMScanSource:
-    """Loads a CT scan from a DICOM directory using MONAI."""
+    """Loads a CT scan from a DICOM directory using MONAI.
 
-    def __init__(self, dicom_dir: Path, patient_id_override: str = None):
+    Args:
+        is_lidc: When True, corrects MONAI's default ITKReader axis order
+            from (x, y, z) to the pipeline convention (z, y, x) via
+            np.transpose(volume, (2, 1, 0)).  Set this when loading LIDC
+            DICOM directories for inference testing.  The root cause is
+            ITKReader's default reverse_indexing=False, which applies to
+            any DICOM source; the flag may be widened or made unconditional
+            once non-LIDC inputs are validated.
+    """
+
+    def __init__(self, dicom_dir: Path, patient_id_override: str = None,
+                 is_lidc: bool = True):
         self._dicom_dir = Path(dicom_dir)
         self._patient_id = patient_id_override or self._dicom_dir.name
+        self._is_lidc = is_lidc
 
     @property
     def patient_id(self) -> str:
@@ -106,6 +118,10 @@ class DICOMScanSource:
 
             volume = data.numpy() if hasattr(data, 'numpy') else np.array(data)
             volume = volume[0] if volume.ndim == 4 else volume
+            # MONAI ITKReader default (reverse_indexing=False) returns (x, y, z).
+            # The pipeline expects (z, y, x) = (slices, rows, cols).
+            if self._is_lidc and volume.ndim == 3:
+                volume = np.transpose(volume, (2, 1, 0))
 
             spacing = self._extract_spacing_from_meta(meta)
             result = VolumeData(volume=volume, spacing=spacing) if spacing is not None else None

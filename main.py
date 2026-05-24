@@ -91,6 +91,7 @@ def _build_pipeline() -> MainPipeline:
         detection_model=detection_model,
         regression_model=regression_model,
         classification_model=classification_model,
+        malignancy_threshold=2.5
     )
 
 
